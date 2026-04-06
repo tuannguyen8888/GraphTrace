@@ -1,6 +1,8 @@
 # GraphTrace
 
 [![CI](https://github.com/tuannguyen8888/GraphTrace/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/tuannguyen8888/GraphTrace/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/graphtrace.svg)](https://www.npmjs.com/package/graphtrace)
+[![GitHub Release](https://img.shields.io/github/v/release/tuannguyen8888/GraphTrace)](https://github.com/tuannguyen8888/GraphTrace/releases)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 
 GraphTrace is a local-first code graph for JavaScript and TypeScript monorepos.
@@ -27,7 +29,7 @@ Current capabilities include:
 - query hints for Prisma and Drizzle patterns
 - MCP tools for search, deps, impact, flow, status, routes, packages, and reindex
 - local HTTP API plus an inspection-focused web UI
-- npm-pack smoke-tested CLI artifact for installation outside this repo
+- published npm CLI package plus GitHub release notes for tagged versions
 
 ## Install
 
@@ -36,6 +38,8 @@ Current capabilities include:
 ```bash
 npm i -g graphtrace
 ```
+
+The public package is available on npm as [`graphtrace`](https://www.npmjs.com/package/graphtrace). Tagged release notes live in [GitHub Releases](https://github.com/tuannguyen8888/GraphTrace/releases).
 
 Or run ad hoc:
 
@@ -153,6 +157,7 @@ fixtures/             Test workspaces
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - [docs/ROADMAP.md](docs/ROADMAP.md)
+- [Releases](https://github.com/tuannguyen8888/GraphTrace/releases)
 - [SECURITY.md](SECURITY.md)
 - [SUPPORT.md](SUPPORT.md)
 
