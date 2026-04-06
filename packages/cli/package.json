@@ -1,6 +1,6 @@
 {
   "name": "graphtrace",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local-first code graph for JS/TS monorepos with CLI, MCP, and local web UI.",
   "type": "module",
   "main": "./dist/index.js",
@@ -12,7 +12,10 @@
   "bin": {
     "graphtrace": "./dist/bin.js"
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "license": "Apache-2.0",
   "publishConfig": {
     "access": "public"
