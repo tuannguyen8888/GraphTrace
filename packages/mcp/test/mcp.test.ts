@@ -30,7 +30,7 @@ describe("mcp", () => {
 
     const transport = new StdioClientTransport({
       command: "pnpm",
-      args: ["exec", "tsx", cliEntry, "mcp"],
+      args: ["exec", "node", "--import", "tsx", cliEntry, "mcp"],
       cwd: fixtureRoot,
       stderr: "pipe",
     });
