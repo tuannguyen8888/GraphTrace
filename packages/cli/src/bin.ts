@@ -12,4 +12,8 @@ if (result.stderr) {
   console.error(result.stderr);
 }
 
-process.exit(result.exitCode);
+if (result.keepAlive) {
+  process.exitCode = result.exitCode;
+} else {
+  process.exit(result.exitCode);
+}

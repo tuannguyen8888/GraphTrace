@@ -9,6 +9,7 @@ import { startGraphTraceServer } from "@graphtrace/server";
 import {
   type CliRunOptions,
   type CliRunResult,
+  type DependencyDirection,
   GRAPHTRACE_DB_PATH,
 } from "@graphtrace/shared";
 import { openGraphStore } from "@graphtrace/storage";
@@ -64,9 +65,16 @@ export async function runCli(
         command === "search"
           ? queryEngine.search(query, readOption(args, "--kind"))
           : command === "deps"
-            ? queryEngine.dependencies(query)
+            ? queryEngine.dependencies(
+                query,
+                readDirectionOption(args, "--direction"),
+                readNumberOption(args, "--depth") ?? 1,
+              )
             : command === "impact"
-              ? queryEngine.impact(query)
+              ? queryEngine.impact(
+                  query,
+                  readNumberOption(args, "--depth") ?? undefined,
+                )
               : command === "flow"
                 ? queryEngine.flow(query)
                 : queryEngine.routes(readOption(args, "--package"));
@@ -85,6 +93,7 @@ export async function runCli(
         exitCode: 0,
         stdout: `web:${server.address}`,
         stderr: "",
+        keepAlive: true,
       };
     }
     case "mcp": {
@@ -93,6 +102,7 @@ export async function runCli(
         exitCode: 0,
         stdout: "",
         stderr: "",
+        keepAlive: true,
       };
     }
     case "watch": {
@@ -119,4 +129,26 @@ function readOption(argv: string[], name: string): string | undefined {
   }
 
   return argv[index + 1];
+}
+
+function readNumberOption(argv: string[], name: string): number | undefined {
+  const raw = readOption(argv, name);
+  if (!raw) {
+    return undefined;
+  }
+
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function readDirectionOption(
+  argv: string[],
+  name: string,
+): DependencyDirection | undefined {
+  const raw = readOption(argv, name);
+  if (raw === "in" || raw === "out" || raw === "both") {
+    return raw;
+  }
+
+  return undefined;
 }

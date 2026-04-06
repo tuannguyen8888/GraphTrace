@@ -28,6 +28,9 @@ describe("server", () => {
       const deps = await fetch(
         `${server.address}/api/deps?target=${encodeURIComponent("apps/api/src/routes/users.ts")}`,
       ).then((response) => response.json());
+      const deepInboundDeps = await fetch(
+        `${server.address}/api/deps?target=${encodeURIComponent("apps/api/src/services/user-service.ts")}&direction=in&depth=2`,
+      ).then((response) => response.json());
       const impact = await fetch(
         `${server.address}/api/impact?target=${encodeURIComponent("apps/api/src/services/user-service.ts")}`,
       ).then((response) => response.json());
@@ -53,6 +56,16 @@ describe("server", () => {
           item.path?.includes("user-service.ts"),
         ),
       ).toBe(true);
+      expect(
+        deepInboundDeps.items.some((item: { path?: string }) =>
+          item.path?.includes("server.ts"),
+        ),
+      ).toBe(true);
+      expect(
+        deepInboundDeps.items.some((item: { path?: string }) =>
+          item.path?.includes("db/client.ts"),
+        ),
+      ).toBe(false);
       expect(
         impact.items.some(
           (item: { kind: string; id: string }) =>

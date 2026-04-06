@@ -52,11 +52,18 @@ export async function startGraphTraceServer(options: {
     return withQueryEngine((engine) => engine.getPackageOverview());
   });
   app.get("/api/deps", async (request) => {
-    const { target = "", direction = "both" } = request.query as {
+    const {
+      target = "",
+      direction = "both",
+      depth,
+    } = request.query as {
       target?: string;
       direction?: "in" | "out" | "both";
+      depth?: string;
     };
-    return withQueryEngine((engine) => engine.dependencies(target, direction));
+    return withQueryEngine((engine) =>
+      engine.dependencies(target, direction, depth ? Number(depth) : undefined),
+    );
   });
   app.get("/api/impact", async (request) => {
     const { target = "", depth } = request.query as {

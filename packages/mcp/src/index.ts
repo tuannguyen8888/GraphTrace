@@ -83,12 +83,13 @@ export async function createGraphTraceMcpServer(options: {
       inputSchema: {
         target: z.string(),
         direction: z.enum(["in", "out", "both"]).default("both"),
+        depth: z.number().int().positive().default(1),
       },
     },
-    async ({ target, direction }) =>
+    async ({ target, direction, depth }) =>
       asToolResult(
         withQueryEngine(options.workspaceRoot, (engine) =>
-          engine.dependencies(target, direction),
+          engine.dependencies(target, direction, depth),
         ),
       ),
   );

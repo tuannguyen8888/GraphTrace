@@ -88,6 +88,7 @@ export interface CliRunResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+  keepAlive?: boolean;
 }
 
 export function toPosixPath(value: string): string {

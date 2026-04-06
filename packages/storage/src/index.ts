@@ -304,42 +304,70 @@ export class GraphStore {
   fileDependencies(
     targetPath: string,
     direction: DependencyDirection = "both",
+    maxDepth = 1,
   ): QueryResult<GraphItem> {
     const targetId = `file:${targetPath}`;
     const items = new Map<string, GraphItem>();
     const rows = this.db
       .prepare("SELECT * FROM edges WHERE type = 'imports'")
       .all() as unknown as EdgeRow[];
+    const outboundEdges = new Map<
+      string,
+      Array<{ id: string; confidence: number }>
+    >();
+    const inboundEdges = new Map<
+      string,
+      Array<{ id: string; confidence: number }>
+    >();
 
     for (const row of rows) {
       if (
-        (direction === "out" || direction === "both") &&
-        row.source_id === targetId &&
+        row.source_id.startsWith("file:") &&
         row.target_id.startsWith("file:")
       ) {
-        const path = row.target_id.slice("file:".length);
-        items.set(row.target_id, {
-          id: row.target_id,
-          kind: "file",
-          label: path,
-          path,
-          confidence: row.confidence,
-        });
+        outboundEdges.set(row.source_id, [
+          ...(outboundEdges.get(row.source_id) ?? []),
+          { id: row.target_id, confidence: row.confidence },
+        ]);
+        inboundEdges.set(row.target_id, [
+          ...(inboundEdges.get(row.target_id) ?? []),
+          { id: row.source_id, confidence: row.confidence },
+        ]);
       }
-      if (
-        (direction === "in" || direction === "both") &&
-        row.target_id === targetId &&
-        row.source_id.startsWith("file:")
-      ) {
-        const path = row.source_id.slice("file:".length);
-        items.set(row.source_id, {
-          id: row.source_id,
-          kind: "file",
-          label: path,
-          path,
-          confidence: row.confidence,
-        });
+    }
+
+    const collect = (
+      adjacency: Map<string, Array<{ id: string; confidence: number }>>,
+    ) => {
+      const visited = new Set<string>([targetId]);
+      const queue: Array<{ id: string; depth: number }> = [
+        { id: targetId, depth: 0 },
+      ];
+
+      while (queue.length > 0) {
+        const current = queue.shift();
+        if (!current || current.depth >= maxDepth) {
+          continue;
+        }
+
+        for (const next of adjacency.get(current.id) ?? []) {
+          if (visited.has(next.id)) {
+            continue;
+          }
+
+          visited.add(next.id);
+          queue.push({ id: next.id, depth: current.depth + 1 });
+          items.set(next.id, this.toFileGraphItem(next.id, next.confidence));
+        }
       }
+    };
+
+    if (direction === "out" || direction === "both") {
+      collect(outboundEdges);
+    }
+
+    if (direction === "in" || direction === "both") {
+      collect(inboundEdges);
     }
 
     return { items: [...items.values()] };
@@ -499,6 +527,17 @@ export class GraphStore {
         label: row.name,
         path: row.root_path,
       })),
+    };
+  }
+
+  private toFileGraphItem(id: string, confidence?: number): GraphItem {
+    const path = id.slice("file:".length);
+    return {
+      id,
+      kind: "file",
+      label: path,
+      path,
+      confidence,
     };
   }
 

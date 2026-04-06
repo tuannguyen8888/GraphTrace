@@ -89,4 +89,90 @@ describe("cli", () => {
       ),
     ).toBe(true);
   });
+
+  test("deps honors --direction and --depth", async () => {
+    await ensureWorkspaceInitialized(fixtureRoot);
+    await indexWorkspace({ workspaceRoot: fixtureRoot, full: true });
+
+    const inbound = await runCli(
+      [
+        "deps",
+        "apps/api/src/services/user-service.ts",
+        "--direction",
+        "in",
+        "--depth",
+        "2",
+      ],
+      { cwd: fixtureRoot },
+    );
+    const outbound = await runCli(
+      [
+        "deps",
+        "apps/api/src/routes/users.ts",
+        "--direction",
+        "out",
+        "--depth",
+        "2",
+      ],
+      { cwd: fixtureRoot },
+    );
+
+    const inboundItems = JSON.parse(inbound.stdout).items as Array<{
+      path?: string;
+    }>;
+    const outboundItems = JSON.parse(outbound.stdout).items as Array<{
+      path?: string;
+    }>;
+
+    expect(
+      inboundItems.some((item) => item.path?.includes("routes/users.ts")),
+    ).toBe(true);
+    expect(inboundItems.some((item) => item.path?.includes("server.ts"))).toBe(
+      true,
+    );
+    expect(
+      inboundItems.some((item) => item.path?.includes("db/client.ts")),
+    ).toBe(false);
+
+    expect(
+      outboundItems.some((item) => item.path?.includes("user-service.ts")),
+    ).toBe(true);
+    expect(
+      outboundItems.some((item) => item.path?.includes("db/client.ts")),
+    ).toBe(true);
+    expect(outboundItems.some((item) => item.path?.includes("server.ts"))).toBe(
+      false,
+    );
+  });
+
+  test("impact honors --depth", async () => {
+    await ensureWorkspaceInitialized(fixtureRoot);
+    await indexWorkspace({ workspaceRoot: fixtureRoot, full: true });
+
+    const shallow = await runCli(
+      ["impact", "apps/api/src/services/user-service.ts", "--depth", "1"],
+      { cwd: fixtureRoot },
+    );
+    const deep = await runCli(
+      ["impact", "apps/api/src/services/user-service.ts", "--depth", "6"],
+      { cwd: fixtureRoot },
+    );
+
+    const shallowItems = JSON.parse(shallow.stdout).items as Array<{
+      path?: string;
+      id: string;
+    }>;
+    const deepItems = JSON.parse(deep.stdout).items as Array<{
+      path?: string;
+      id: string;
+    }>;
+
+    expect(shallowItems.some((item) => item.id === "GET /users")).toBe(true);
+    expect(shallowItems.some((item) => item.path?.includes("server.ts"))).toBe(
+      false,
+    );
+    expect(deepItems.some((item) => item.path?.includes("server.ts"))).toBe(
+      true,
+    );
+  });
 });

@@ -9,8 +9,12 @@ export function createQueryEngine(store: GraphStore) {
     routes(packageName?: string) {
       return store.routes(packageName);
     },
-    dependencies(target: string, direction: DependencyDirection = "both") {
-      return store.fileDependencies(target, direction);
+    dependencies(
+      target: string,
+      direction: DependencyDirection = "both",
+      depth = 1,
+    ) {
+      return store.fileDependencies(target, direction, depth);
     },
     impact(target: string, depth = 6) {
       return store.impactFromPath(target, depth);
