@@ -48,6 +48,15 @@ pnpm build
 - Include screenshots or terminal output when the change affects UX or CLI output
 - Keep unrelated refactors out of the same pull request
 
+## Releases
+
+GraphTrace releases are managed with Changesets from `main`.
+
+- Merge the version PR that Changesets opens before expecting a publish run to succeed
+- Configure either the `NPM_TOKEN` GitHub Actions secret or npm trusted publishing for this repository
+- If using trusted publishing, keep the published package `repository.url` pointing at `https://github.com/tuannguyen8888/GraphTrace`
+- After release plumbing changes, verify `pnpm build` and `pnpm test:smoke` locally before re-running the `Release` workflow
+
 ## Issues
 
 When reporting a bug, include:
