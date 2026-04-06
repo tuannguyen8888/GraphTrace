@@ -10,25 +10,18 @@ import {
   loadGraphTraceConfig,
 } from "@graphtrace/config";
 import {
+  type DiscoveredUnit,
   type IndexWorkspaceOptions,
   type IndexWorkspaceResult,
+  type PluginProvenance,
   type RouteItem,
   relativePath,
   toPosixPath,
 } from "@graphtrace/shared";
 import { openGraphStore } from "@graphtrace/storage";
+import { type WorkspacePackageInfo, inspectWorkspace } from "./workspace";
 
-interface PackageInfo {
-  id: string;
-  name: string;
-  rootPath: string;
-}
-
-const SOURCE_GLOBS = [
-  "apps/**/*.{ts,tsx,js,jsx}",
-  "packages/**/*.{ts,tsx,js,jsx}",
-  "services/**/*.{ts,tsx,js,jsx}",
-];
+export { inspectWorkspace } from "./workspace";
 
 export async function indexWorkspace(
   options: IndexWorkspaceOptions,
@@ -36,6 +29,7 @@ export async function indexWorkspace(
   const initialized = await ensureWorkspaceInitialized(options.workspaceRoot);
   const config = await loadGraphTraceConfig(options.workspaceRoot);
   const store = openGraphStore(initialized.dbPath);
+  const inspection = await inspectWorkspace(options.workspaceRoot, config);
 
   if (options.full !== false) {
     store.reset();
@@ -45,20 +39,15 @@ export async function indexWorkspace(
     options.full === false ? "incremental" : "full",
   );
 
-  const packages = await discoverPackages(
-    options.workspaceRoot,
-    config.workspaceGlobs,
-  );
-  for (const entry of packages) {
+  for (const unit of inspection.units) {
+    store.upsertUnit(unit);
+  }
+
+  for (const entry of inspection.packages) {
     store.upsertPackage(entry);
   }
 
-  const filePaths = await fg(SOURCE_GLOBS, {
-    cwd: options.workspaceRoot,
-    ignore: [...config.exclude, "**/node_modules/**", "**/.graphtrace/**"],
-    onlyFiles: true,
-  });
-  const normalizedFilePaths = filePaths.map(toPosixPath);
+  const normalizedFilePaths = [...inspection.unitFiles.values()].flat();
   const filePathSet = new Set(normalizedFilePaths);
   const filesToIndex =
     options.full === false &&
@@ -91,12 +80,14 @@ export async function indexWorkspace(
     const absolutePath = join(options.workspaceRoot, filePath);
     const sourceText = await readFile(absolutePath, "utf8");
     const hash = createHash("sha1").update(sourceText).digest("hex");
-    const owningPackage = findOwningPackage(filePath, packages);
+    const owningPackage = findOwningPackage(filePath, inspection.packages);
+    const owningUnit = findOwningUnit(filePath, inspection.units);
     const fileId = `file:${toPosixPath(filePath)}`;
     store.upsertFile({
       id: fileId,
       path: toPosixPath(filePath),
       packageId: owningPackage?.id ?? "package:root",
+      unitId: owningUnit?.id ?? "unit:root",
       hash,
     });
 
@@ -137,6 +128,11 @@ export async function indexWorkspace(
       store.upsertSymbol(symbol);
     }
 
+    const matchedPluginIds = new Set(
+      owningUnit?.pluginMatches
+        .filter((match) => match.kind === "framework-plugin" && match.matched)
+        .map((match) => match.pluginId) ?? [],
+    );
     for (const route of extractRoutes(
       options.workspaceRoot,
       sourceFile,
@@ -144,11 +140,18 @@ export async function indexWorkspace(
       filePath,
       localImports,
       symbolMap,
+      owningUnit?.id ?? "unit:root",
+      matchedPluginIds,
     )) {
       store.upsertRoute(route);
     }
 
-    for (const query of extractQueryHints(sourceText, filePath)) {
+    for (const query of extractQueryHints(
+      sourceText,
+      filePath,
+      owningUnit?.id ?? "unit:root",
+      matchedPluginIds,
+    )) {
       store.insertEdge(query);
     }
   }
@@ -160,45 +163,38 @@ export async function indexWorkspace(
   return {
     dbPath: initialized.dbPath,
     summary,
-  };
-}
-
-async function discoverPackages(
-  workspaceRoot: string,
-  workspaceGlobs: string[],
-): Promise<PackageInfo[]> {
-  const packageJsonPaths = await fg(
-    workspaceGlobs.map((globPattern) => `${globPattern}/package.json`),
-    {
-      cwd: workspaceRoot,
-      onlyFiles: true,
+    units: inspection.units,
+    explain: {
+      units: inspection.units,
     },
-  );
-
-  const results: PackageInfo[] = [];
-  for (const packageJsonPath of packageJsonPaths) {
-    const content = JSON.parse(
-      await readFile(join(workspaceRoot, packageJsonPath), "utf8"),
-    ) as { name?: string };
-    const rootPath = toPosixPath(posix.dirname(packageJsonPath));
-    results.push({
-      id: `package:${rootPath}`,
-      name: content.name ?? rootPath,
-      rootPath,
-    });
-  }
-  return results;
+  };
 }
 
 function findOwningPackage(
   filePath: string,
-  packages: PackageInfo[],
-): PackageInfo | undefined {
+  packages: WorkspacePackageInfo[],
+): WorkspacePackageInfo | undefined {
   return packages
     .filter(
       (entry) =>
+        entry.rootPath === "." ||
         filePath.startsWith(`${entry.rootPath}/`) ||
         filePath === entry.rootPath,
+    )
+    .sort((left, right) => right.rootPath.length - left.rootPath.length)[0];
+}
+
+function findOwningUnit(
+  filePath: string,
+  units: DiscoveredUnit[],
+): DiscoveredUnit | undefined {
+  return units
+    .filter(
+      (unit) =>
+        unit.indexingMode === "full" &&
+        (unit.rootPath === "." ||
+          filePath === unit.rootPath ||
+          filePath.startsWith(`${unit.rootPath}/`)),
     )
     .sort((left, right) => right.rootPath.length - left.rootPath.length)[0];
 }
@@ -352,6 +348,42 @@ function extractRoutes(
   filePath: string,
   imports: Array<{ localName: string; resolvedPath: string | null }>,
   symbols: Array<{ id: string; name: string }>,
+  unitId: string,
+  matchedPluginIds: Set<string>,
+): RouteItem[] {
+  const routes: RouteItem[] = [];
+  for (const pluginId of matchedPluginIds) {
+    if (pluginId === "framework:express" || pluginId === "framework:fastify") {
+      routes.push(
+        ...extractHttpRoutes(
+          workspaceRoot,
+          filePath,
+          sourceText,
+          imports,
+          symbols,
+          unitId,
+          pluginId === "framework:fastify" ? "fastify" : "express",
+        ),
+      );
+    }
+    if (pluginId === "framework:next") {
+      routes.push(...extractNextRoutes(sourceText, filePath, unitId));
+    }
+    if (pluginId === "framework:nest") {
+      routes.push(...extractNestRoutes(sourceFile, filePath, unitId));
+    }
+  }
+  return dedupeRoutes(routes);
+}
+
+function extractHttpRoutes(
+  workspaceRoot: string,
+  filePath: string,
+  sourceText: string,
+  imports: Array<{ localName: string; resolvedPath: string | null }>,
+  symbols: Array<{ id: string; name: string }>,
+  unitId: string,
+  framework: "express" | "fastify",
 ): RouteItem[] {
   const routes: RouteItem[] = [];
   const routerMatches = [
@@ -359,9 +391,21 @@ function extractRoutes(
       /\b([A-Za-z0-9_]+)\.(get|post|put|patch|delete)\(\s*["'`](.*?)["'`]\s*,\s*([A-Za-z0-9_]+)/g,
     ),
   ];
+  const inlineMatches = [
+    ...sourceText.matchAll(
+      /\b([A-Za-z0-9_]+)\.(get|post|put|patch|delete)\(\s*["'`](.*?)["'`]\s*,\s*(?:async\s+)?\(/g,
+    ),
+  ];
 
   for (const match of routerMatches) {
     const receiver = match[1];
+    if (
+      framework === "fastify" &&
+      !receiver.toLowerCase().includes("fastify") &&
+      receiver !== "app"
+    ) {
+      continue;
+    }
     const method = match[2].toUpperCase();
     const path = match[3];
     const handlerName = match[4];
@@ -372,9 +416,6 @@ function extractRoutes(
     const handlerSymbolId = importedHandler?.resolvedPath
       ? `symbol:${toPosixPath(relativePath(workspaceRoot, importedHandler.resolvedPath))}#${handlerName}`
       : (localHandler?.id ?? `symbol:${toPosixPath(filePath)}#${handlerName}`);
-    const framework = receiver.toLowerCase().includes("fastify")
-      ? "fastify"
-      : "express";
 
     routes.push({
       id: `${method} ${path}`,
@@ -384,34 +425,74 @@ function extractRoutes(
       handlerSymbolId,
       filePath: toPosixPath(filePath),
       framework,
+      unitId,
       confidence: 0.95,
+      provenance: buildProvenance(`framework:${framework}`, 0.95),
     });
   }
 
-  const nextMatch = filePath.match(/src\/app\/api\/(.*)\/route\.ts$/);
-  if (nextMatch) {
-    const routePath = `/${nextMatch[1]}`;
-    const routeMethods = [
-      ...sourceText.matchAll(
-        /export\s+async\s+function\s+(GET|POST|PUT|PATCH|DELETE)/g,
-      ),
-    ];
-    for (const routeMethod of routeMethods) {
-      routes.push({
-        id: `${routeMethod[1]} ${routePath}`,
-        method: routeMethod[1],
-        path: routePath,
-        handlerName: routeMethod[1],
-        handlerSymbolId: `symbol:${toPosixPath(filePath)}#${routeMethod[1]}`,
-        filePath: toPosixPath(filePath),
-        framework: "next",
-        confidence: 0.95,
-      });
+  for (const match of inlineMatches) {
+    const receiver = match[1];
+    if (
+      framework === "fastify" &&
+      !receiver.toLowerCase().includes("fastify") &&
+      receiver !== "app"
+    ) {
+      continue;
     }
+
+    const method = match[2].toUpperCase();
+    const path = match[3];
+    routes.push({
+      id: `${method} ${path}`,
+      method,
+      path,
+      handlerName: `${receiver}_${method.toLowerCase()}_handler`,
+      handlerSymbolId: `symbol:${toPosixPath(filePath)}#${receiver}_${method.toLowerCase()}_handler`,
+      filePath: toPosixPath(filePath),
+      framework,
+      unitId,
+      confidence: 0.9,
+      provenance: buildProvenance(`framework:${framework}`, 0.9),
+    });
   }
 
-  const nestRoutes = extractNestRoutes(sourceFile, filePath);
-  routes.push(...nestRoutes);
+  return routes;
+}
+
+function extractNextRoutes(
+  sourceText: string,
+  filePath: string,
+  unitId: string,
+): RouteItem[] {
+  const routes: RouteItem[] = [];
+  const nextMatch =
+    filePath.match(/(?:^|\/)app\/api\/(.*)\/route\.ts$/) ??
+    filePath.match(/src\/app\/api\/(.*)\/route\.ts$/);
+  if (!nextMatch) {
+    return routes;
+  }
+
+  const routePath = `/${nextMatch[1]}`;
+  const routeMethods = [
+    ...sourceText.matchAll(
+      /export\s+async\s+function\s+(GET|POST|PUT|PATCH|DELETE)/g,
+    ),
+  ];
+  for (const routeMethod of routeMethods) {
+    routes.push({
+      id: `${routeMethod[1]} ${routePath}`,
+      method: routeMethod[1],
+      path: routePath,
+      handlerName: routeMethod[1],
+      handlerSymbolId: `symbol:${toPosixPath(filePath)}#${routeMethod[1]}`,
+      filePath: toPosixPath(filePath),
+      framework: "next",
+      unitId,
+      confidence: 0.95,
+      provenance: buildProvenance("framework:next", 0.95),
+    });
+  }
 
   return routes;
 }
@@ -419,6 +500,7 @@ function extractRoutes(
 function extractNestRoutes(
   sourceFile: ts.SourceFile,
   filePath: string,
+  unitId: string,
 ): RouteItem[] {
   const routes: RouteItem[] = [];
 
@@ -455,7 +537,9 @@ function extractNestRoutes(
         handlerSymbolId: `symbol:${toPosixPath(filePath)}#${member.name.text}`,
         filePath: toPosixPath(filePath),
         framework: "nest",
+        unitId,
         confidence: 0.93,
+        provenance: buildProvenance("framework:nest", 0.93),
       });
     }
   }
@@ -526,6 +610,8 @@ function joinRouteSegments(controllerPath: string, methodPath: string): string {
 function extractQueryHints(
   sourceText: string,
   filePath: string,
+  unitId: string,
+  matchedPluginIds: Set<string>,
 ): Array<{
   id: string;
   type: string;
@@ -534,17 +620,29 @@ function extractQueryHints(
   targetId: string;
   targetKind: string;
   confidence: number;
-  metadata: { label: string; filePath: string };
+  metadata: {
+    label: string;
+    filePath: string;
+    unitId: string;
+    pluginId: string;
+    pluginVersion: string;
+  };
 }> {
   const edges = [];
   const fileId = `file:${toPosixPath(filePath)}`;
   const matchers = [
-    /prisma\.\w+\.(findMany|findFirst|findUnique)\(/g,
-    /db\.select\(\)\.from\(/g,
-  ];
+    {
+      pluginId: "framework:prisma",
+      pattern: /prisma\.\w+\.(findMany|findFirst|findUnique)\(/g,
+    },
+    {
+      pluginId: "framework:drizzle",
+      pattern: /db\.select\(\)\.from\(/g,
+    },
+  ].filter((entry) => matchedPluginIds.has(entry.pluginId));
 
   for (const matcher of matchers) {
-    for (const match of sourceText.matchAll(matcher)) {
+    for (const match of sourceText.matchAll(matcher.pattern)) {
       const label = match[0];
       edges.push({
         id: `edge:query:${toPosixPath(filePath)}:${label}`,
@@ -557,10 +655,36 @@ function extractQueryHints(
         metadata: {
           label,
           filePath: toPosixPath(filePath),
+          unitId,
+          pluginId: matcher.pluginId,
+          pluginVersion: "internal",
         },
       });
     }
   }
 
   return edges;
+}
+
+function dedupeRoutes(routes: RouteItem[]): RouteItem[] {
+  const seen = new Set<string>();
+  return routes.filter((route) => {
+    const key = `${route.id}:${route.framework}:${route.filePath}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+function buildProvenance(
+  pluginId: string,
+  confidence: number,
+): PluginProvenance {
+  return {
+    pluginId,
+    pluginVersion: "internal",
+    confidence,
+  };
 }

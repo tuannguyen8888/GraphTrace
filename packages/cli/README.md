@@ -1,6 +1,6 @@
 # graphtrace
 
-GraphTrace is a local-first code graph for JavaScript and TypeScript monorepos.
+GraphTrace is a local-first code graph for JavaScript and TypeScript projects.
 
 It builds a local SQLite-backed graph, then exposes the same data through:
 
@@ -28,7 +28,10 @@ pnpm dlx graphtrace doctor
 ```bash
 graphtrace init
 graphtrace index --full
+graphtrace index --full --explain
 graphtrace status
+graphtrace doctor --units
+graphtrace doctor --plugins
 graphtrace search listUsers --kind symbol
 graphtrace routes
 graphtrace web --port 4310
@@ -37,7 +40,7 @@ graphtrace mcp
 
 ## Notes
 
-- Supported focus for v0.1: JS/TS monorepos
+- Supported focus for v1.0: JS/TS projects with dynamic unit discovery
 - Route discovery: Express, Fastify, Nest, Next App Router
 - Query hints: Prisma and Drizzle heuristics
 - Storage/runtime stays local by default

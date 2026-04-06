@@ -3,7 +3,12 @@ import type { Dirent } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 
-import { ensureWorkspaceInitialized } from "@graphtrace/config";
+import {
+  defaultGraphTraceConfig,
+  ensureWorkspaceInitialized,
+  loadGraphTraceConfig,
+} from "@graphtrace/config";
+import { inspectWorkspace } from "@graphtrace/indexer";
 import { createGraphTraceMcpServer } from "@graphtrace/mcp";
 import {
   runWorkspaceIndex,
@@ -18,7 +23,6 @@ import type {
   IndexWorkspaceResult,
 } from "@graphtrace/shared";
 
-const WATCH_ROOTS = ["apps", "packages", "services"];
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx"]);
 const IGNORED_NAMES = new Set([
   "node_modules",
@@ -47,6 +51,31 @@ export async function runCli(
       };
     }
     case "doctor": {
+      if (args.includes("--units")) {
+        const inspection = await inspectWorkspace(cwd, defaultGraphTraceConfig);
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify(inspection.units, null, 2),
+          stderr: "",
+        };
+      }
+
+      if (args.includes("--plugins")) {
+        const inspection = await inspectWorkspace(cwd, defaultGraphTraceConfig);
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify(
+            inspection.units.map((unit) => ({
+              rootPath: unit.rootPath,
+              plugins: unit.pluginMatches,
+            })),
+            null,
+            2,
+          ),
+          stderr: "",
+        };
+      }
+
       const pnpmVersion = spawnSync("pnpm", ["-v"], { encoding: "utf8" });
       return {
         exitCode: 0,
@@ -60,15 +89,18 @@ export async function runCli(
     }
     case "index": {
       const asJson = args.includes("--json");
+      const explain = args.includes("--explain");
       const result = await runWorkspaceIndex({
         workspaceRoot: cwd,
         mode: args.includes("--full") ? "full" : "incremental",
       });
       return {
         exitCode: 0,
-        stdout: asJson
-          ? JSON.stringify(result, null, 2)
-          : formatIndexResult(result),
+        stdout: explain
+          ? JSON.stringify(result.explain, null, 2)
+          : asJson
+            ? JSON.stringify(result, null, 2)
+            : formatIndexResult(result),
         stderr: "",
       };
     }
@@ -242,6 +274,7 @@ function formatIndexResult(result: IndexWorkspaceResult): string {
   return [
     "Index completed",
     `db:${result.dbPath}`,
+    `units:${result.units.length}`,
     `packages:${result.summary.packageCount}`,
     `files:${result.summary.fileCount}`,
     `symbols:${result.summary.symbolCount}`,
@@ -257,6 +290,7 @@ function formatStatus(status: GraphTraceStatus): string {
     `db:${status.dbPath}`,
     `last_index_mode:${status.lastIndexRun?.mode ?? "never"}`,
     `last_index_completed_at:${status.lastIndexRun?.completedAt ?? "never"}`,
+    `units:${status.units.length}`,
     `packages:${status.counts.packageCount}`,
     `files:${status.counts.fileCount}`,
     `symbols:${status.counts.symbolCount}`,
@@ -293,10 +327,26 @@ function formatWatchCycle(
 
 async function collectWorkspaceSnapshot(workspaceRoot: string) {
   const snapshot = new Map<string, string>();
-  for (const root of WATCH_ROOTS) {
+  const config = await loadRuntimeConfig(workspaceRoot);
+  const inspection = await inspectWorkspace(workspaceRoot, config);
+  const roots = inspection.units
+    .filter((unit) => unit.indexingMode === "full")
+    .flatMap((unit) =>
+      unit.sourceRoots.length > 0 ? unit.sourceRoots : [unit.rootPath],
+    );
+
+  for (const root of roots) {
     await walkWorkspace(join(workspaceRoot, root), workspaceRoot, snapshot);
   }
   return snapshot;
+}
+
+async function loadRuntimeConfig(workspaceRoot: string) {
+  try {
+    return await loadGraphTraceConfig(workspaceRoot);
+  } catch {
+    return defaultGraphTraceConfig;
+  }
 }
 
 async function walkWorkspace(

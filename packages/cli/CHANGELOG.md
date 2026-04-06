@@ -1,5 +1,11 @@
 # graphtrace
 
+## 1.0.0
+
+### Major Changes
+
+- Move GraphTrace to automatic JS/TS project discovery with unit-aware indexing, internal pluginized framework/query extraction, dynamic watch roots, and synchronized workspace versioning.
+
 ## 0.1.1
 
 ### Patch Changes

@@ -25,7 +25,7 @@ export async function createGraphTraceMcpServer(options: {
 }) {
   const server = new McpServer({
     name: "graphtrace",
-    version: "0.1.0",
+    version: "1.0.0",
   });
   const withQueryEngine = <T>(
     action: (engine: ReturnType<typeof createQueryEngine>) => T,

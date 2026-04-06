@@ -20,6 +20,11 @@ describe("config", () => {
       "packages/*",
       "services/*",
     ]);
+    expect(config.detection.mode).toBe("auto");
+    expect(config.detection.maxDepth).toBe(6);
+    expect(config.detection.minUnitConfidence).toBe(60);
+    expect(config.plugins.disable).toEqual([]);
+    expect(config.plugins.prefer).toEqual([]);
     expect(config.search.embeddingsProvider).toBe("none");
     expect(cacheStat.isDirectory()).toBe(true);
     expect(logsStat.isDirectory()).toBe(true);
@@ -36,6 +41,7 @@ describe("config", () => {
     const loaded = await loadGraphTraceConfig(initialized.rootDir);
 
     expect(loaded.web.port).toBe(9999);
+    expect(loaded.detection.mode).toBe("auto");
     expect(loaded.frameworks).toContain("express");
     expect(loaded.exclude).toContain("**/dist/**");
   });

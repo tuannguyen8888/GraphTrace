@@ -41,6 +41,7 @@ export function createQueryEngine(store: GraphStore) {
         workspaceRoot,
         dbPath,
         counts: store.stats(),
+        units: store.units(),
         lastIndexRun: store.lastIndexRun(),
       };
     },

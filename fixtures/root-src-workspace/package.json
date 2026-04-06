@@ -1,0 +1,8 @@
+{
+  "name": "root-src-workspace",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "express": "^5.0.0"
+  }
+}
