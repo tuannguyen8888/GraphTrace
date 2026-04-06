@@ -1,28 +1,12 @@
-import { join } from "node:path";
-
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
-import { createQueryEngine } from "@graphtrace/query-engine";
-import { GRAPHTRACE_DB_PATH } from "@graphtrace/shared";
-import { openGraphStore } from "@graphtrace/storage";
-
-type QueryEngine = ReturnType<typeof createQueryEngine>;
-
-function withQueryEngine<T>(
-  workspaceRoot: string,
-  action: (engine: QueryEngine) => T,
-): T {
-  const store = openGraphStore(join(workspaceRoot, GRAPHTRACE_DB_PATH));
-  const engine = createQueryEngine(store);
-
-  try {
-    return action(engine);
-  } finally {
-    store.close();
-  }
-}
+import {
+  type createQueryEngine,
+  runWorkspaceIndex,
+  withWorkspaceQueryEngine,
+} from "@graphtrace/query-engine";
 
 function asToolResult(payload: unknown) {
   return {
@@ -43,6 +27,10 @@ export async function createGraphTraceMcpServer(options: {
     name: "graphtrace",
     version: "0.1.0",
   });
+  const withQueryEngine = <T>(
+    action: (engine: ReturnType<typeof createQueryEngine>) => T,
+  ) =>
+    withWorkspaceQueryEngine(options.workspaceRoot, (engine) => action(engine));
 
   server.registerTool(
     "search_code",
@@ -53,11 +41,7 @@ export async function createGraphTraceMcpServer(options: {
       },
     },
     async ({ query }) =>
-      asToolResult(
-        withQueryEngine(options.workspaceRoot, (engine) =>
-          engine.search(query),
-        ),
-      ),
+      asToolResult(withQueryEngine((engine) => engine.search(query))),
   );
 
   server.registerTool(
@@ -69,11 +53,7 @@ export async function createGraphTraceMcpServer(options: {
       },
     },
     async ({ query }) =>
-      asToolResult(
-        withQueryEngine(options.workspaceRoot, (engine) =>
-          engine.getSymbolContext(query),
-        ),
-      ),
+      asToolResult(withQueryEngine((engine) => engine.getSymbolContext(query))),
   );
 
   server.registerTool(
@@ -88,7 +68,7 @@ export async function createGraphTraceMcpServer(options: {
     },
     async ({ target, direction, depth }) =>
       asToolResult(
-        withQueryEngine(options.workspaceRoot, (engine) =>
+        withQueryEngine((engine) =>
           engine.dependencies(target, direction, depth),
         ),
       ),
@@ -104,11 +84,7 @@ export async function createGraphTraceMcpServer(options: {
       },
     },
     async ({ target, depth }) =>
-      asToolResult(
-        withQueryEngine(options.workspaceRoot, (engine) =>
-          engine.impact(target, depth),
-        ),
-      ),
+      asToolResult(withQueryEngine((engine) => engine.impact(target, depth))),
   );
 
   server.registerTool(
@@ -121,11 +97,7 @@ export async function createGraphTraceMcpServer(options: {
       },
     },
     async ({ target, depth }) =>
-      asToolResult(
-        withQueryEngine(options.workspaceRoot, (engine) =>
-          engine.flow(target, depth),
-        ),
-      ),
+      asToolResult(withQueryEngine((engine) => engine.flow(target, depth))),
   );
 
   server.registerTool(
@@ -134,9 +106,37 @@ export async function createGraphTraceMcpServer(options: {
       description: "List routes discovered in the indexed workspace.",
       inputSchema: {},
     },
+    async () => asToolResult(withQueryEngine((engine) => engine.routes())),
+  );
+
+  server.registerTool(
+    "get_status",
+    {
+      description: "Get workspace, database, and last index run status.",
+      inputSchema: {},
+    },
     async () =>
       asToolResult(
-        withQueryEngine(options.workspaceRoot, (engine) => engine.routes()),
+        withWorkspaceQueryEngine(options.workspaceRoot, (engine, dbPath) =>
+          engine.status(options.workspaceRoot, dbPath),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "run_index",
+    {
+      description: "Run GraphTrace indexing for the current workspace.",
+      inputSchema: {
+        mode: z.enum(["full", "incremental"]).default("incremental"),
+      },
+    },
+    async ({ mode }) =>
+      asToolResult(
+        await runWorkspaceIndex({
+          workspaceRoot: options.workspaceRoot,
+          mode,
+        }),
       ),
   );
 
@@ -147,11 +147,7 @@ export async function createGraphTraceMcpServer(options: {
       inputSchema: {},
     },
     async () =>
-      asToolResult(
-        withQueryEngine(options.workspaceRoot, (engine) =>
-          engine.listPackages(),
-        ),
-      ),
+      asToolResult(withQueryEngine((engine) => engine.listPackages())),
   );
 
   server.registerTool(
@@ -161,11 +157,7 @@ export async function createGraphTraceMcpServer(options: {
       inputSchema: {},
     },
     async () =>
-      asToolResult(
-        withQueryEngine(options.workspaceRoot, (engine) =>
-          engine.getPackageOverview(),
-        ),
-      ),
+      asToolResult(withQueryEngine((engine) => engine.getPackageOverview())),
   );
 
   const transport = new StdioServerTransport();

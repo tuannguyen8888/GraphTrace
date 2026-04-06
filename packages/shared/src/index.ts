@@ -70,9 +70,26 @@ export interface IndexSummary {
   queryEdgeCount: number;
 }
 
+export interface IndexRunInfo {
+  id: number;
+  mode: "full" | "incremental";
+  startedAt: string;
+  completedAt: string | null;
+  summary: IndexSummary | null;
+}
+
+export interface GraphTraceStatus {
+  workspaceRoot: string;
+  dbPath: string;
+  counts: IndexSummary;
+  lastIndexRun: IndexRunInfo | null;
+}
+
 export interface IndexWorkspaceOptions {
   workspaceRoot: string;
   full?: boolean;
+  changedFiles?: string[];
+  removedFiles?: string[];
 }
 
 export interface IndexWorkspaceResult {
@@ -82,6 +99,8 @@ export interface IndexWorkspaceResult {
 
 export interface CliRunOptions {
   cwd?: string;
+  emitStdout?: (line: string) => void;
+  emitStderr?: (line: string) => void;
 }
 
 export interface CliRunResult {
@@ -89,6 +108,7 @@ export interface CliRunResult {
   stdout: string;
   stderr: string;
   keepAlive?: boolean;
+  cleanup?: () => void | Promise<void>;
 }
 
 export function toPosixPath(value: string): string {

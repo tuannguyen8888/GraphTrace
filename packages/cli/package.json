@@ -1,24 +1,33 @@
 {
   "name": "graphtrace",
   "version": "0.1.0",
+  "description": "Local-first code graph for JS/TS monorepos with CLI, MCP, and local web UI.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "private": true,
+  "private": false,
+  "exports": {
+    ".": "./dist/index.js"
+  },
   "bin": {
     "graphtrace": "./dist/bin.js"
   },
+  "files": ["dist", "README.md"],
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22 <25"
+  },
   "scripts": {
-    "build": "tsup src/index.ts src/bin.ts --format esm --dts --clean --tsconfig ../../tsconfig.json"
+    "build": "node ./scripts/build-package.mjs"
   },
   "dependencies": {
-    "@graphtrace/config": "workspace:*",
-    "@graphtrace/indexer": "workspace:*",
-    "@graphtrace/mcp": "workspace:*",
-    "@graphtrace/query-engine": "workspace:*",
-    "@graphtrace/server": "workspace:*",
-    "@graphtrace/shared": "workspace:*",
-    "@graphtrace/storage": "workspace:*",
-    "commander": "^14.0.1"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "fast-glob": "^3.3.3",
+    "fastify": "^5.6.1",
+    "typescript": "^5.9.3",
+    "zod": "^4.1.12"
   }
 }

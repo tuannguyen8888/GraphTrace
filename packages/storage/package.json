@@ -6,10 +6,9 @@
   "types": "./dist/index.d.ts",
   "private": true,
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --clean --tsconfig ../../tsconfig.json"
+    "build": "tsup src/index.ts --format esm --dts --clean --tsconfig ../../tsconfig.json && node ../../scripts/fix-node-protocol.mjs dist/index.js"
   },
   "dependencies": {
-    "@graphtrace/shared": "workspace:*",
-    "better-sqlite3": "^12.4.1"
+    "@graphtrace/shared": "workspace:*"
   }
 }

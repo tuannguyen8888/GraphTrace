@@ -7,6 +7,13 @@ import { openGraphStore } from "@graphtrace/storage";
 import { createQueryEngine } from "../src/index";
 
 const fixtureRoot = join(process.cwd(), "fixtures", "express-prisma-workspace");
+const nextFixtureRoot = join(process.cwd(), "fixtures", "next-api-workspace");
+const nestFixtureRoot = join(
+  process.cwd(),
+  "fixtures",
+  "nest-drizzle-workspace",
+);
+const fastifyFixtureRoot = join(process.cwd(), "fixtures", "fastify-workspace");
 
 describe("query engine", () => {
   test("search, routes, deps, impact, and flow work on the express fixture", async () => {
@@ -42,5 +49,61 @@ describe("query engine", () => {
       ),
     ).toBe(true);
     expect(flow.items.some((item) => item.kind === "query")).toBe(true);
+  });
+
+  test("exposes framework metadata for next, nest, and fastify routes", async () => {
+    await ensureWorkspaceInitialized(nextFixtureRoot);
+    await ensureWorkspaceInitialized(nestFixtureRoot);
+    await ensureWorkspaceInitialized(fastifyFixtureRoot);
+    await indexWorkspace({ workspaceRoot: nextFixtureRoot, full: true });
+    await indexWorkspace({ workspaceRoot: nestFixtureRoot, full: true });
+    await indexWorkspace({ workspaceRoot: fastifyFixtureRoot, full: true });
+
+    const nextStore = openGraphStore(
+      join(nextFixtureRoot, ".graphtrace", "index.db"),
+    );
+    const nestStore = openGraphStore(
+      join(nestFixtureRoot, ".graphtrace", "index.db"),
+    );
+    const fastifyStore = openGraphStore(
+      join(fastifyFixtureRoot, ".graphtrace", "index.db"),
+    );
+
+    try {
+      const nextRoutes = createQueryEngine(nextStore).routes();
+      const nestRoutes = createQueryEngine(nestStore).routes();
+      const nestFlow = createQueryEngine(nestStore).flow("GET /users");
+      const fastifyRoutes = createQueryEngine(fastifyStore).routes();
+
+      expect(nextRoutes.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            framework: "next",
+            path: "/users",
+          }),
+        ]),
+      );
+      expect(nestRoutes.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            framework: "nest",
+            path: "/users",
+          }),
+        ]),
+      );
+      expect(nestFlow.items.some((item) => item.kind === "query")).toBe(true);
+      expect(fastifyRoutes.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            framework: "fastify",
+            path: "/users",
+          }),
+        ]),
+      );
+    } finally {
+      nextStore.close();
+      nestStore.close();
+      fastifyStore.close();
+    }
   });
 });
