@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Contributor guide
+    url: https://github.com/tuannguyen8888/GraphTrace/blob/main/CONTRIBUTING.md
+    about: Review the branch strategy and local verification checklist before opening a pull request.
+  - name: Architecture notes
+    url: https://github.com/tuannguyen8888/GraphTrace/blob/main/docs/ARCHITECTURE.md
+    about: Check the current architecture before proposing structural changes.
