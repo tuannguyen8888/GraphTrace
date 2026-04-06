@@ -1,3 +1,5 @@
+import { listUsers } from "./users.service.js";
+
 @Controller("users")
 export class UsersController {
   @Get()

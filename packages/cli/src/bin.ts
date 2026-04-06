@@ -2,7 +2,14 @@
 
 import { runCli } from "./index.js";
 
-const result = await runCli(process.argv.slice(2));
+const result = await runCli(process.argv.slice(2), {
+  emitStdout: (line) => {
+    console.log(line);
+  },
+  emitStderr: (line) => {
+    console.error(line);
+  },
+});
 
 if (result.stdout) {
   console.log(result.stdout);

@@ -5,41 +5,106 @@
 
 GraphTrace is a local-first code graph for JavaScript and TypeScript monorepos.
 
-It indexes your codebase into a local graph store, then exposes one query layer to three surfaces:
+It indexes code into a local SQLite graph store, then exposes the same query layer through:
 
 - a CLI for engineers
 - an MCP server for coding agents
 - a local web UI for inspection
 
-The goal is simple: make a codebase easier to understand, safer to change, and easier to query without shipping your source code to a remote service by default.
+The goal is simple: make a codebase easier to understand, safer to change, and easier to query without shipping source code to a remote service by default.
 
-## Why GraphTrace Exists
+## What You Can Use Today
 
-Modern monorepos are difficult to reason about because the information you need is split across files, frameworks, packages, routes, imports, and conventions.
+GraphTrace is now usable as a local alpha for JS/TS monorepos.
 
-When a team asks questions like:
+Current capabilities include:
 
-- "If I change this service, what breaks?"
-- "Which route reaches this file?"
-- "What depends on this package?"
-- "How do I give an AI agent useful context without handing it the whole repo?"
+- workspace initialization and health checks
+- full and incremental indexing into a local SQLite-backed graph store
+- foreground watch mode with stale cleanup on add, change, and delete
+- search, dependency tracing, impact analysis, route flow, and workspace status
+- route discovery for Express, Fastify, Nest, and Next App Router
+- query hints for Prisma and Drizzle patterns
+- MCP tools for search, deps, impact, flow, status, routes, packages, and reindex
+- local HTTP API plus an inspection-focused web UI
+- npm-pack smoke-tested CLI artifact for installation outside this repo
 
-the answers are usually slow, manual, and inconsistent.
+## Install
 
-GraphTrace is built to turn those questions into local queries against one source of truth.
+### Use from npm
 
-## Who GraphTrace Is For
+```bash
+npm i -g graphtrace
+```
 
-GraphTrace is intended for teams working in JS/TS codebases, especially monorepos, who need both human-readable and machine-readable understanding of their system.
+Or run ad hoc:
 
-Typical users include:
+```bash
+npx graphtrace doctor
+pnpm dlx graphtrace doctor
+```
 
-- application engineers doing refactors, reviews, and incident analysis
-- platform and architecture teams who need dependency and route visibility
-- engineering managers or tech leads who want safer change planning
-- AI-assisted development workflows that need scoped, local context through MCP instead of broad repo dumps
+### Work on this repo
 
-## What Problems It Solves
+```bash
+pnpm install
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm test:smoke
+```
+
+## Quick Start
+
+Initialize GraphTrace in a workspace:
+
+```bash
+graphtrace init
+```
+
+Build the local index:
+
+```bash
+graphtrace index --full
+```
+
+Check workspace/index state:
+
+```bash
+graphtrace status
+graphtrace status --json
+```
+
+Run incremental watch mode:
+
+```bash
+graphtrace watch --json --debounce-ms 250
+```
+
+Search the indexed graph:
+
+```bash
+graphtrace search listUsers --kind symbol
+graphtrace routes
+graphtrace deps apps/api/src/routes/users.ts --direction out --depth 2
+graphtrace impact apps/api/src/services/user-service.ts --depth 4
+graphtrace flow "GET /users"
+```
+
+Start the local web UI:
+
+```bash
+graphtrace web --port 4310
+```
+
+Start the MCP server:
+
+```bash
+graphtrace mcp
+```
+
+## Why Teams Use It
 
 GraphTrace is designed to help with:
 
@@ -50,135 +115,21 @@ GraphTrace is designed to help with:
 - providing structured context to AI agents through MCP
 - powering internal tooling from one graph/query backend instead of separate ad hoc scripts
 
-## How Teams Use It
-
-### 1. Change Planning
-
-Before editing a file, engineers ask GraphTrace which routes, files, and dependencies are likely to be affected.
-
-### 2. Codebase Navigation
-
-Instead of grepping blindly through a large monorepo, teams search symbols, packages, or routes from one local interface.
-
-### 3. AI Context Delivery
-
-An agent can call the MCP server to fetch targeted context such as routes, dependency edges, or impact results without reading the entire repository.
-
-### 4. Local Exploration
-
-Teams can expose the same indexed graph to the CLI, API server, and local web UI without introducing a hosted backend as a requirement.
-
-## Core Capabilities
-
-Today, GraphTrace focuses on a graph-first local engine and a thin set of interfaces on top of it.
-
-Current capabilities include:
-
-- workspace initialization
-- local indexing into a SQLite-backed graph store
-- queries for search, dependencies, impact analysis, and route flow
-- a CLI entry point
-- an MCP stdio server
-- a local HTTP server and web UI skeleton
-
-## Product Shape
-
-GraphTrace is not just an AI integration and it is not just a developer CLI.
-
-It is a shared local graph/query layer that can serve:
-
-- humans through terminal and UI workflows
-- automation through APIs
-- coding agents through MCP
-
-That is why the project is positioned as a hybrid developer tool plus agent context engine.
-
 ## Architecture
 
-GraphTrace currently uses a graph-first local architecture:
+GraphTrace uses a graph-first local architecture:
 
 1. Source code is indexed into a local SQLite graph store.
-2. One query engine reads that graph and answers search, dependency, impact, and flow questions.
+2. One query engine reads that graph and answers search, dependency, impact, flow, route, and status questions.
 3. The CLI, MCP server, local API server, and web UI all sit on top of the same local data model.
 
-This architecture keeps the system local-first, composable, and AI-optional.
-
 For more detail, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-## Current Status
-
-GraphTrace is in active bootstrap, not a finished platform.
-
-What is real today:
-
-- local indexing
-- package, symbol, file, and route discovery
-- dependency and impact queries
-- MCP tool exposure
-- local web UI foundation
-
-What is still evolving:
-
-- broader framework coverage
-- production hardening
-- richer graph semantics
-- optional embeddings and semantic retrieval
-
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the current sequence.
-
-## Quick Start
-
-### Requirements
-
-- Node.js 22 or newer within the supported range declared in `package.json`
-- `pnpm`
-
-### Install
-
-```bash
-pnpm install
-```
-
-### Verify the workspace
-
-```bash
-pnpm lint
-pnpm typecheck
-pnpm test
-pnpm build
-```
-
-## CLI Examples
-
-Initialize GraphTrace in a workspace:
-
-```bash
-pnpm --filter graphtrace exec graphtrace init
-```
-
-Build or refresh the local index:
-
-```bash
-pnpm --filter graphtrace exec graphtrace index --full
-```
-
-Search the indexed graph:
-
-```bash
-pnpm --filter graphtrace exec graphtrace search listUsers
-```
-
-List discovered routes:
-
-```bash
-pnpm --filter graphtrace exec graphtrace routes
-```
 
 ## Repository Layout
 
 ```text
 apps/web              Local UI
-packages/cli          CLI surface
+packages/cli          Public CLI package
 packages/config       Workspace configuration
 packages/indexer      Source indexing
 packages/mcp          MCP server
@@ -211,7 +162,7 @@ GraphTrace uses `main` as the stable branch for open source collaboration.
 
 - open pull requests against `main`
 - keep feature work on topic branches
-- run `pnpm lint`, `pnpm typecheck`, and `pnpm test` before opening a pull request
+- run `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, and `pnpm test:smoke` before opening a pull request
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow.
 

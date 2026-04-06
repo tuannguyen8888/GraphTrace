@@ -35,6 +35,50 @@ describe("cli", () => {
     expect(result.stdout).toContain("pnpm:");
   });
 
+  test("index supports --json and status reports workspace/index metadata", async () => {
+    await ensureWorkspaceInitialized(fixtureRoot);
+
+    const indexed = await runCli(["index", "--full", "--json"], {
+      cwd: fixtureRoot,
+    });
+    const status = await runCli(["status", "--json"], {
+      cwd: fixtureRoot,
+    });
+
+    const indexedPayload = JSON.parse(indexed.stdout) as {
+      dbPath: string;
+      summary: {
+        packageCount: number;
+      };
+    };
+    const statusPayload = JSON.parse(status.stdout) as {
+      workspaceRoot: string;
+      dbPath: string;
+      counts: {
+        packageCount: number;
+        fileCount: number;
+        symbolCount: number;
+        routeCount: number;
+        queryEdgeCount: number;
+      };
+      lastIndexRun: {
+        mode: string;
+        completedAt: string | null;
+      } | null;
+    };
+
+    expect(indexed.exitCode).toBe(0);
+    expect(indexedPayload.summary.packageCount).toBeGreaterThanOrEqual(2);
+
+    expect(status.exitCode).toBe(0);
+    expect(statusPayload.workspaceRoot).toBe(fixtureRoot);
+    expect(statusPayload.dbPath).toBe(indexedPayload.dbPath);
+    expect(statusPayload.counts.packageCount).toBeGreaterThanOrEqual(2);
+    expect(statusPayload.counts.fileCount).toBeGreaterThan(0);
+    expect(statusPayload.lastIndexRun?.mode).toBe("full");
+    expect(statusPayload.lastIndexRun?.completedAt).toBeTruthy();
+  });
+
   test("routes filters by package when --package is provided", async () => {
     await ensureWorkspaceInitialized(fixtureRoot);
     await indexWorkspace({ workspaceRoot: fixtureRoot, full: true });

@@ -4,9 +4,10 @@ import { fileURLToPath } from "node:url";
 
 import Fastify, { type FastifyInstance } from "fastify";
 
-import { createQueryEngine } from "@graphtrace/query-engine";
-import { GRAPHTRACE_DB_PATH } from "@graphtrace/shared";
-import { openGraphStore } from "@graphtrace/storage";
+import {
+  type createQueryEngine,
+  withWorkspaceQueryEngine,
+} from "@graphtrace/query-engine";
 
 export interface GraphTraceServer {
   address: string;
@@ -21,64 +22,64 @@ interface StartGraphTraceServerOptions extends GraphTraceServerOptions {
   port: number;
 }
 
-const serverPackageRoot = join(
-  dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "..",
-  "..",
-);
-const builtWebRoot = join(serverPackageRoot, "apps", "web", "dist");
-
-function withQueryEngineForWorkspace(workspaceRoot: string) {
-  return <T>(
-    action: (engine: ReturnType<typeof createQueryEngine>) => T,
-  ): T => {
-    const store = openGraphStore(join(workspaceRoot, GRAPHTRACE_DB_PATH));
-    const engine = createQueryEngine(store);
-
-    try {
-      return action(engine);
-    } finally {
-      store.close();
-    }
-  };
-}
+const currentModuleDir = dirname(fileURLToPath(import.meta.url));
+const builtWebRoots = [
+  join(currentModuleDir, "web-dist"),
+  join(currentModuleDir, "..", "web-dist"),
+  join(currentModuleDir, "..", "..", "web-dist"),
+  join(currentModuleDir, "..", "..", "..", "web-dist"),
+  join(currentModuleDir, "..", "..", "..", "apps", "web", "dist"),
+];
 
 async function readBuiltWebFile(pathParts: string[]): Promise<{
   body: string | Buffer;
   contentType: string;
 } | null> {
-  const filePath = join(builtWebRoot, ...pathParts);
+  for (const builtWebRoot of builtWebRoots) {
+    const filePath = join(builtWebRoot, ...pathParts);
 
-  try {
-    await access(filePath);
-  } catch {
-    return null;
+    try {
+      await access(filePath);
+    } catch {
+      continue;
+    }
+
+    const extension = extname(filePath);
+    const contentType =
+      extension === ".js"
+        ? "text/javascript; charset=utf-8"
+        : extension === ".css"
+          ? "text/css; charset=utf-8"
+          : extension === ".html"
+            ? "text/html; charset=utf-8"
+            : "application/octet-stream";
+
+    return {
+      body: await readFile(
+        filePath,
+        extension === ".html" ? "utf8" : undefined,
+      ),
+      contentType,
+    };
   }
 
-  const extension = extname(filePath);
-  const contentType =
-    extension === ".js"
-      ? "text/javascript; charset=utf-8"
-      : extension === ".css"
-        ? "text/css; charset=utf-8"
-        : extension === ".html"
-          ? "text/html; charset=utf-8"
-          : "application/octet-stream";
-
-  return {
-    body: await readFile(filePath, extension === ".html" ? "utf8" : undefined),
-    contentType,
-  };
+  return null;
 }
 
 export function createGraphTraceApp(
   options: GraphTraceServerOptions,
 ): FastifyInstance {
   const app = Fastify();
-  const withQueryEngine = withQueryEngineForWorkspace(options.workspaceRoot);
+  const withQueryEngine = <T>(
+    action: (engine: ReturnType<typeof createQueryEngine>, dbPath: string) => T,
+  ) => withWorkspaceQueryEngine(options.workspaceRoot, action);
 
   app.get("/health", async () => ({ ok: true }));
+  app.get("/api/status", async () => {
+    return withQueryEngine((engine, dbPath) =>
+      engine.status(options.workspaceRoot, dbPath),
+    );
+  });
   app.get("/api/search", async (request) => {
     const { q, kind } = request.query as { q?: string; kind?: string };
     const query = String(q ?? "");
@@ -145,8 +146,9 @@ export function createGraphTraceApp(
     const html = await readBuiltWebFile(["index.html"]);
 
     if (!html || typeof html.body !== "string") {
-      reply.header("content-type", "text/html; charset=utf-8");
-      return "<!doctype html><html><body><h1>GraphTrace</h1></body></html>";
+      reply.code(503);
+      reply.header("content-type", "text/plain; charset=utf-8");
+      return "GraphTrace web assets are missing. Run `pnpm web:build` before starting the web server.";
     }
 
     reply.header("content-type", html.contentType);

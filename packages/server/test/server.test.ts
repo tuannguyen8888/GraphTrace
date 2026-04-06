@@ -76,6 +76,10 @@ describe("server", () => {
         method: "GET",
         url: "/api/routes",
       });
+      const status = await app.inject({
+        method: "GET",
+        url: "/api/status",
+      });
       const packages = await app.inject({
         method: "GET",
         url: "/api/packages",
@@ -103,6 +107,7 @@ describe("server", () => {
       });
 
       const routesPayload = routes.json();
+      const statusPayload = status.json();
       const packagesPayload = packages.json();
       const depsPayload = deps.json();
       const deepInboundDepsPayload = deepInboundDeps.json();
@@ -115,6 +120,17 @@ describe("server", () => {
       expect(assetMatch?.[1]).toBeTruthy();
       expect(asset.statusCode).toBe(200);
       expect(asset.headers["content-type"]).toContain("javascript");
+      expect(statusPayload).toEqual(
+        expect.objectContaining({
+          workspaceRoot: fixtureRoot,
+          counts: expect.objectContaining({
+            routeCount: 1,
+          }),
+          lastIndexRun: expect.objectContaining({
+            mode: "full",
+          }),
+        }),
+      );
 
       expect(routesPayload.items).toEqual(
         expect.arrayContaining([

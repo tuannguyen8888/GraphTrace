@@ -1,0 +1,5 @@
+{
+  "name": "fastify-workspace",
+  "private": true,
+  "type": "module"
+}

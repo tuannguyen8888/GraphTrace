@@ -9,6 +9,7 @@
     "build": "tsup src/index.ts --format esm --dts --clean --tsconfig ../../tsconfig.json"
   },
   "dependencies": {
+    "@graphtrace/indexer": "workspace:*",
     "@graphtrace/shared": "workspace:*",
     "@graphtrace/storage": "workspace:*"
   }

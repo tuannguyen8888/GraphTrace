@@ -5,10 +5,13 @@ import { DatabaseSync } from "node:sqlite";
 import type {
   DependencyDirection,
   GraphItem,
+  IndexRunInfo,
   QueryResult,
   RouteItem,
   SearchItem,
 } from "@graphtrace/shared";
+
+const SCHEMA_VERSION = 2;
 
 interface EdgeRow {
   type: string;
@@ -54,6 +57,40 @@ export class GraphStore {
     `);
   }
 
+  deleteFileArtifacts(filePath: string): void {
+    const normalizedPath = filePath.replaceAll("\\", "/");
+    const fileId = `file:${normalizedPath}`;
+    const symbolIds = (
+      this.db
+        .prepare("SELECT id FROM symbols WHERE file_id = ?")
+        .all(fileId) as Array<{ id: string }>
+    ).map((row) => row.id);
+    const routeIds = (
+      this.db
+        .prepare("SELECT id FROM routes WHERE file_path = ?")
+        .all(normalizedPath) as Array<{ id: string }>
+    ).map((row) => row.id);
+
+    this.db.prepare("DELETE FROM fts_content WHERE id = ?").run(fileId);
+    for (const symbolId of symbolIds) {
+      this.db.prepare("DELETE FROM fts_content WHERE id = ?").run(symbolId);
+    }
+    for (const routeId of routeIds) {
+      this.db.prepare("DELETE FROM fts_content WHERE id = ?").run(routeId);
+    }
+
+    this.db
+      .prepare(
+        "DELETE FROM edges WHERE source_id = ? OR target_id = ? OR target_id LIKE ?",
+      )
+      .run(fileId, fileId, `query:${normalizedPath}#%`);
+    this.db
+      .prepare("DELETE FROM routes WHERE file_path = ?")
+      .run(normalizedPath);
+    this.db.prepare("DELETE FROM symbols WHERE file_id = ?").run(fileId);
+    this.db.prepare("DELETE FROM files WHERE id = ?").run(fileId);
+  }
+
   beginIndexRun(mode: "full" | "incremental"): number {
     const startedAt = new Date().toISOString();
     const result = this.db
@@ -70,6 +107,34 @@ export class GraphStore {
         "UPDATE index_runs SET completed_at = ?, summary_json = ? WHERE id = ?",
       )
       .run(new Date().toISOString(), JSON.stringify(summary), indexRunId);
+  }
+
+  lastIndexRun(): IndexRunInfo | null {
+    const row = this.db
+      .prepare(
+        "SELECT id, mode, started_at, completed_at, summary_json FROM index_runs ORDER BY id DESC LIMIT 1",
+      )
+      .get() as
+      | {
+          id: number;
+          mode: "full" | "incremental";
+          started_at: string;
+          completed_at: string | null;
+          summary_json: string | null;
+        }
+      | undefined;
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      id: row.id,
+      mode: row.mode,
+      startedAt: row.started_at,
+      completedAt: row.completed_at,
+      summary: row.summary_json ? JSON.parse(row.summary_json) : null,
+    };
   }
 
   upsertPackage(record: { id: string; name: string; rootPath: string }): void {
@@ -530,6 +595,14 @@ export class GraphStore {
     };
   }
 
+  listIndexedFilePaths(): string[] {
+    return (
+      this.db.prepare("SELECT path FROM files ORDER BY path").all() as Array<{
+        path: string;
+      }>
+    ).map((row) => row.path);
+  }
+
   private toFileGraphItem(id: string, confidence?: number): GraphItem {
     const path = id.slice("file:".length);
     return {
@@ -567,6 +640,22 @@ export class GraphStore {
   }
 
   private ensureSchema(): void {
+    const currentVersion = (
+      this.db.prepare("PRAGMA user_version").get() as { user_version: number }
+    ).user_version;
+
+    if (currentVersion !== SCHEMA_VERSION) {
+      this.db.exec(`
+        DROP TABLE IF EXISTS packages;
+        DROP TABLE IF EXISTS files;
+        DROP TABLE IF EXISTS symbols;
+        DROP TABLE IF EXISTS routes;
+        DROP TABLE IF EXISTS edges;
+        DROP TABLE IF EXISTS index_runs;
+        DROP TABLE IF EXISTS fts_content;
+      `);
+    }
+
     this.db.exec(`
       PRAGMA journal_mode = WAL;
 
@@ -634,6 +723,8 @@ export class GraphStore {
 
       CREATE INDEX IF NOT EXISTS idx_fts_content_path
         ON fts_content (path);
+
+      PRAGMA user_version = ${SCHEMA_VERSION};
     `);
   }
 }

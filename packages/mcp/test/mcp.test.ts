@@ -61,8 +61,10 @@ describe("mcp", () => {
         "get_impact_analysis",
         "get_package_overview",
         "get_routes",
+        "get_status",
         "get_symbol_context",
         "list_packages",
+        "run_index",
         "search_code",
       ]);
 
@@ -100,6 +102,16 @@ describe("mcp", () => {
         name: "get_routes",
         arguments: {},
       });
+      const status = await client.callTool({
+        name: "get_status",
+        arguments: {},
+      });
+      const reindex = await client.callTool({
+        name: "run_index",
+        arguments: {
+          mode: "incremental",
+        },
+      });
       const packages = await client.callTool({
         name: "list_packages",
         arguments: {},
@@ -114,6 +126,17 @@ describe("mcp", () => {
       const impactItems = readToolItems(impact.structuredContent);
       const flowItems = readToolItems(flow.structuredContent);
       const routeItems = readToolItems(routes.structuredContent);
+      const statusPayload = status.structuredContent as {
+        workspaceRoot?: string;
+        counts?: {
+          routeCount?: number;
+        };
+      };
+      const reindexPayload = reindex.structuredContent as {
+        summary?: {
+          routeCount?: number;
+        };
+      };
       const packageItems = readToolItems(packages.structuredContent);
       const overviewItems = readToolItems(overview.structuredContent);
 
@@ -174,6 +197,11 @@ describe("mcp", () => {
           }),
         ]),
       );
+      expect(status.isError).not.toBe(true);
+      expect(statusPayload.workspaceRoot).toBe(fixtureRoot);
+      expect(statusPayload.counts?.routeCount).toBe(1);
+      expect(reindex.isError).not.toBe(true);
+      expect(reindexPayload.summary?.routeCount).toBe(1);
       expect(packages.isError).not.toBe(true);
       expect(packageItems).toEqual(
         expect.arrayContaining([
