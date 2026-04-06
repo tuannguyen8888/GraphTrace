@@ -1,0 +1,52 @@
+"documentation":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "README.md"
+          - "CONTRIBUTING.md"
+          - "docs/**"
+
+"ci":
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/workflows/**"
+
+"area: web":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "apps/web/**"
+
+"area: cli":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "packages/cli/**"
+
+"area: server":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "packages/server/**"
+
+"area: mcp":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "packages/mcp/**"
+
+"area: query-engine":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "packages/query-engine/**"
+
+"area: indexer":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "packages/indexer/**"
+
+"area: storage":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "packages/storage/**"
+
+"area: config":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "packages/config/**"
+          - "packages/shared/**"
