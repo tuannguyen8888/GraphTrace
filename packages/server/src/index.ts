@@ -1,7 +1,8 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { access, readFile } from "node:fs/promises";
+import { dirname, extname, join, normalize } from "node:path";
+import { fileURLToPath } from "node:url";
 
-import Fastify from "fastify";
+import Fastify, { type FastifyInstance } from "fastify";
 
 import { createQueryEngine } from "@graphtrace/query-engine";
 import { GRAPHTRACE_DB_PATH } from "@graphtrace/shared";
@@ -12,18 +13,27 @@ export interface GraphTraceServer {
   close: () => Promise<void>;
 }
 
-export async function startGraphTraceServer(options: {
+interface GraphTraceServerOptions {
   workspaceRoot: string;
-  port: number;
-}): Promise<GraphTraceServer> {
-  const app = Fastify();
+}
 
-  const withQueryEngine = <T>(
+interface StartGraphTraceServerOptions extends GraphTraceServerOptions {
+  port: number;
+}
+
+const serverPackageRoot = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "..",
+);
+const builtWebRoot = join(serverPackageRoot, "apps", "web", "dist");
+
+function withQueryEngineForWorkspace(workspaceRoot: string) {
+  return <T>(
     action: (engine: ReturnType<typeof createQueryEngine>) => T,
   ): T => {
-    const store = openGraphStore(
-      join(options.workspaceRoot, GRAPHTRACE_DB_PATH),
-    );
+    const store = openGraphStore(join(workspaceRoot, GRAPHTRACE_DB_PATH));
     const engine = createQueryEngine(store);
 
     try {
@@ -32,6 +42,41 @@ export async function startGraphTraceServer(options: {
       store.close();
     }
   };
+}
+
+async function readBuiltWebFile(pathParts: string[]): Promise<{
+  body: string | Buffer;
+  contentType: string;
+} | null> {
+  const filePath = join(builtWebRoot, ...pathParts);
+
+  try {
+    await access(filePath);
+  } catch {
+    return null;
+  }
+
+  const extension = extname(filePath);
+  const contentType =
+    extension === ".js"
+      ? "text/javascript; charset=utf-8"
+      : extension === ".css"
+        ? "text/css; charset=utf-8"
+        : extension === ".html"
+          ? "text/html; charset=utf-8"
+          : "application/octet-stream";
+
+  return {
+    body: await readFile(filePath, extension === ".html" ? "utf8" : undefined),
+    contentType,
+  };
+}
+
+export function createGraphTraceApp(
+  options: GraphTraceServerOptions,
+): FastifyInstance {
+  const app = Fastify();
+  const withQueryEngine = withQueryEngineForWorkspace(options.workspaceRoot);
 
   app.get("/health", async () => ({ ok: true }));
   app.get("/api/search", async (request) => {
@@ -83,16 +128,38 @@ export async function startGraphTraceServer(options: {
       engine.flow(target, depth ? Number(depth) : undefined),
     );
   });
-  app.get("/", async () => {
-    try {
-      return await readFile(
-        join(options.workspaceRoot, "apps/web/index.html"),
-        "utf8",
-      );
-    } catch {
+  app.get("/assets/*", async (request, reply) => {
+    const rawPath = String((request.params as { "*": string })["*"] ?? "");
+    const assetPath = normalize(rawPath).replace(/^(\.\.(\/|\\|$))+/, "");
+    const asset = await readBuiltWebFile(["assets", assetPath]);
+
+    if (!asset) {
+      reply.code(404);
+      return { error: "asset_not_found" };
+    }
+
+    reply.header("content-type", asset.contentType);
+    return asset.body;
+  });
+  app.get("/", async (_request, reply) => {
+    const html = await readBuiltWebFile(["index.html"]);
+
+    if (!html || typeof html.body !== "string") {
+      reply.header("content-type", "text/html; charset=utf-8");
       return "<!doctype html><html><body><h1>GraphTrace</h1></body></html>";
     }
+
+    reply.header("content-type", html.contentType);
+    return html.body;
   });
+
+  return app;
+}
+
+export async function startGraphTraceServer(
+  options: StartGraphTraceServerOptions,
+): Promise<GraphTraceServer> {
+  const app = createGraphTraceApp(options);
 
   await app.listen({ host: "127.0.0.1", port: options.port });
   return {

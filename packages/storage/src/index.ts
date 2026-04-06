@@ -622,12 +622,18 @@ export class GraphStore {
         summary_json TEXT
       );
 
-      CREATE VIRTUAL TABLE IF NOT EXISTS fts_content USING fts5(
-        kind,
-        id UNINDEXED,
-        text,
-        path UNINDEXED
+      CREATE TABLE IF NOT EXISTS fts_content (
+        kind TEXT NOT NULL,
+        id TEXT PRIMARY KEY,
+        text TEXT NOT NULL,
+        path TEXT NOT NULL
       );
+
+      CREATE INDEX IF NOT EXISTS idx_fts_content_kind
+        ON fts_content (kind);
+
+      CREATE INDEX IF NOT EXISTS idx_fts_content_path
+        ON fts_content (path);
     `);
   }
 }
