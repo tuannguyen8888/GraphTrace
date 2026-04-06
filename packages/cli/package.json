@@ -12,10 +12,7 @@
   "bin": {
     "graphtrace": "./dist/bin.js"
   },
-  "files": [
-    "dist",
-    "README.md"
-  ],
+  "files": ["dist", "README.md"],
   "license": "Apache-2.0",
   "publishConfig": {
     "access": "public"
