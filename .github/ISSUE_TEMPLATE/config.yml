@@ -1,8 +1,14 @@
 blank_issues_enabled: false
 contact_links:
+  - name: Questions and discussion
+    url: https://github.com/tuannguyen8888/GraphTrace/discussions
+    about: Use Discussions for usage questions, architecture discussion, and general product feedback.
   - name: Contributor guide
     url: https://github.com/tuannguyen8888/GraphTrace/blob/main/CONTRIBUTING.md
     about: Review the branch strategy and local verification checklist before opening a pull request.
   - name: Architecture notes
     url: https://github.com/tuannguyen8888/GraphTrace/blob/main/docs/ARCHITECTURE.md
     about: Check the current architecture before proposing structural changes.
+  - name: Security policy
+    url: https://github.com/tuannguyen8888/GraphTrace/blob/main/SECURITY.md
+    about: Follow the responsible disclosure policy for security reports.
