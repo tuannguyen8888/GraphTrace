@@ -14,6 +14,8 @@ It builds a local SQLite-backed graph, then exposes the same data through:
 npm i -g graphtrace
 ```
 
+The published package lives at [npmjs.com/package/graphtrace](https://www.npmjs.com/package/graphtrace). Tagged release notes live in [GitHub Releases](https://github.com/tuannguyen8888/GraphTrace/releases).
+
 Or run without installing:
 
 ```bash
