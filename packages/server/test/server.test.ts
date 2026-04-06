@@ -1,3 +1,13 @@
+import {
+  access,
+  cp,
+  mkdir,
+  mkdtemp,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, test } from "vitest";
@@ -7,11 +17,48 @@ import { indexWorkspace } from "@graphtrace/indexer";
 import { createGraphTraceApp } from "../src/index";
 
 const fixtureRoot = join(process.cwd(), "fixtures", "express-prisma-workspace");
+const builtWebRoot = join(process.cwd(), "apps", "web", "dist");
 
 describe("server", () => {
   test("exposes APIs and serves the built web UI for an indexed workspace", async () => {
     await ensureWorkspaceInitialized(fixtureRoot);
     await indexWorkspace({ workspaceRoot: fixtureRoot, full: true });
+
+    const backupRoot = await mkdtemp(join(tmpdir(), "graphtrace-web-dist-"));
+    const backupDistRoot = join(backupRoot, "dist");
+    let hadExistingDist = false;
+
+    try {
+      await access(builtWebRoot);
+      hadExistingDist = true;
+      await rename(builtWebRoot, backupDistRoot);
+    } catch {
+      hadExistingDist = false;
+    }
+
+    await mkdir(join(builtWebRoot, "assets"), { recursive: true });
+    await writeFile(
+      join(builtWebRoot, "index.html"),
+      [
+        "<!doctype html>",
+        '<html lang="en">',
+        "  <head>",
+        '    <meta charset="UTF-8" />',
+        '    <script type="module" src="/assets/test-entry.js"></script>',
+        "  </head>",
+        "  <body>",
+        '    <div id="root"></div>',
+        "  </body>",
+        "</html>",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(
+      join(builtWebRoot, "assets", "test-entry.js"),
+      'console.log("GraphTrace test asset");\n',
+      "utf8",
+    );
 
     const app = createGraphTraceApp({
       workspaceRoot: fixtureRoot,
@@ -110,6 +157,12 @@ describe("server", () => {
       ).toBe(true);
     } finally {
       await app.close();
+      await rm(builtWebRoot, { recursive: true, force: true });
+      if (hadExistingDist) {
+        await mkdir(join(builtWebRoot, ".."), { recursive: true });
+        await rename(backupDistRoot, builtWebRoot);
+      }
+      await rm(backupRoot, { recursive: true, force: true });
     }
   });
 });
