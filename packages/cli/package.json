@@ -14,6 +14,10 @@
   },
   "files": ["dist", "README.md"],
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tuannguyen8888/GraphTrace.git"
+  },
   "publishConfig": {
     "access": "public"
   },
