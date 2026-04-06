@@ -54,3 +54,13 @@ pnpm --filter graphtrace exec graphtrace index --full
 pnpm --filter graphtrace exec graphtrace search listUsers
 pnpm --filter graphtrace exec graphtrace routes
 ```
+
+## Contributing
+
+GraphTrace uses `main` as the stable branch for open source collaboration.
+
+- Open pull requests against `main`
+- Keep feature work on topic branches
+- Run `pnpm lint`, `pnpm typecheck`, and `pnpm test` before opening a pull request
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow.

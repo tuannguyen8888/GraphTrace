@@ -1,6 +1,5 @@
 # Contributing
 
-- Use Node.js 22+
-- Use `pnpm`
-- Run `pnpm lint`, `pnpm test`, and `pnpm typecheck` before submitting changes
+The canonical contributor guide lives at the repository root.
 
+See [`CONTRIBUTING.md`](../CONTRIBUTING.md) for the current branch strategy, pull request flow, and local verification checklist.
