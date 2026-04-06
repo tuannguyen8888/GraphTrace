@@ -1,0 +1,17 @@
+{
+  "name": "@graphtrace/server",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "private": true,
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean --tsconfig ../../tsconfig.json"
+  },
+  "dependencies": {
+    "@graphtrace/query-engine": "workspace:*",
+    "@graphtrace/shared": "workspace:*",
+    "@graphtrace/storage": "workspace:*",
+    "fastify": "^5.6.1"
+  }
+}

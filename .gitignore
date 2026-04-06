@@ -1,0 +1,11 @@
+node_modules
+dist
+coverage
+.turbo
+.vite
+*.tsbuildinfo
+playwright-report
+test-results
+.DS_Store
+.graphtrace
+.brv
