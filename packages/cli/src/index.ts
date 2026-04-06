@@ -62,14 +62,14 @@ export async function runCli(
       const query = args[0] ?? "";
       const output =
         command === "search"
-          ? queryEngine.search(query)
+          ? queryEngine.search(query, readOption(args, "--kind"))
           : command === "deps"
             ? queryEngine.dependencies(query)
             : command === "impact"
               ? queryEngine.impact(query)
               : command === "flow"
                 ? queryEngine.flow(query)
-                : queryEngine.routes();
+                : queryEngine.routes(readOption(args, "--package"));
       store.close();
       return {
         exitCode: 0,
@@ -110,4 +110,13 @@ export async function runCli(
         stderr: `unknown command: ${command ?? "<none>"}`,
       };
   }
+}
+
+function readOption(argv: string[], name: string): string | undefined {
+  const index = argv.indexOf(name);
+  if (index < 0) {
+    return undefined;
+  }
+
+  return argv[index + 1];
 }

@@ -219,12 +219,13 @@ export class GraphStore {
       .run(record.kind, record.id, record.text, record.path);
   }
 
-  search(query: string): QueryResult<SearchItem> {
+  search(query: string, kind?: string): QueryResult<SearchItem> {
     const rows = this.db
       .prepare(`
         SELECT kind, id, path, text
         FROM fts_content
         WHERE text LIKE ?
+          AND (? IS NULL OR kind = ?)
         ORDER BY
           CASE kind
             WHEN 'symbol' THEN 0
@@ -235,7 +236,7 @@ export class GraphStore {
           text
         LIMIT 20
       `)
-      .all(`%${query}%`) as Array<{
+      .all(`%${query}%`, kind ?? null, kind ?? null) as Array<{
       kind: string;
       id: string;
       path: string | null;
@@ -253,21 +254,27 @@ export class GraphStore {
     };
   }
 
-  routes(): QueryResult<RouteItem> {
+  routes(packageName?: string): QueryResult<RouteItem> {
     const rows = this.db
       .prepare("SELECT * FROM routes ORDER BY method, path")
       .all() as unknown as RouteRow[];
+    const items = rows.map((row) => this.mapRouteRow(row));
+
+    if (!packageName) {
+      return { items };
+    }
+
+    const matchingPackage = this.db
+      .prepare("SELECT root_path FROM packages WHERE name = ?")
+      .get(packageName) as { root_path: string } | undefined;
+
     return {
-      items: rows.map((row) => ({
-        id: row.id,
-        method: row.method,
-        path: row.path,
-        handlerName: row.handler_name,
-        handlerSymbolId: row.handler_symbol_id,
-        filePath: row.file_path,
-        framework: row.framework,
-        confidence: row.confidence,
-      })),
+      items: items.filter((item) =>
+        matchingPackage
+          ? item.filePath === matchingPackage.root_path ||
+            item.filePath.startsWith(`${matchingPackage.root_path}/`)
+          : false,
+      ),
     };
   }
 
@@ -278,6 +285,10 @@ export class GraphStore {
     if (!row) {
       return null;
     }
+    return this.mapRouteRow(row);
+  }
+
+  private mapRouteRow(row: RouteRow): RouteItem {
     return {
       id: row.id,
       method: row.method,

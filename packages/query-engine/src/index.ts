@@ -3,11 +3,11 @@ import type { GraphStore } from "@graphtrace/storage";
 
 export function createQueryEngine(store: GraphStore) {
   return {
-    search(query: string) {
-      return store.search(query);
+    search(query: string, kind?: string) {
+      return store.search(query, kind);
     },
-    routes() {
-      return store.routes();
+    routes(packageName?: string) {
+      return store.routes(packageName);
     },
     dependencies(target: string, direction: DependencyDirection = "both") {
       return store.fileDependencies(target, direction);

@@ -18,25 +18,63 @@ export async function startGraphTraceServer(options: {
 }): Promise<GraphTraceServer> {
   const app = Fastify();
 
+  const withQueryEngine = <T>(
+    action: (engine: ReturnType<typeof createQueryEngine>) => T,
+  ): T => {
+    const store = openGraphStore(
+      join(options.workspaceRoot, GRAPHTRACE_DB_PATH),
+    );
+    const engine = createQueryEngine(store);
+
+    try {
+      return action(engine);
+    } finally {
+      store.close();
+    }
+  };
+
   app.get("/health", async () => ({ ok: true }));
   app.get("/api/search", async (request) => {
-    const query = String((request.query as { q?: string }).q ?? "");
-    const store = openGraphStore(
-      join(options.workspaceRoot, GRAPHTRACE_DB_PATH),
-    );
-    const engine = createQueryEngine(store);
-    const result = engine.search(query);
-    store.close();
-    return result;
+    const { q, kind } = request.query as { q?: string; kind?: string };
+    const query = String(q ?? "");
+    return withQueryEngine((engine) => engine.search(query, kind || undefined));
   });
-  app.get("/api/routes", async () => {
-    const store = openGraphStore(
-      join(options.workspaceRoot, GRAPHTRACE_DB_PATH),
+  app.get("/api/routes", async (request) => {
+    const packageName = String(
+      (request.query as { package?: string }).package ?? "",
     );
-    const engine = createQueryEngine(store);
-    const result = engine.routes();
-    store.close();
-    return result;
+    return withQueryEngine((engine) => engine.routes(packageName || undefined));
+  });
+  app.get("/api/packages", async () => {
+    return withQueryEngine((engine) => engine.listPackages());
+  });
+  app.get("/api/overview", async () => {
+    return withQueryEngine((engine) => engine.getPackageOverview());
+  });
+  app.get("/api/deps", async (request) => {
+    const { target = "", direction = "both" } = request.query as {
+      target?: string;
+      direction?: "in" | "out" | "both";
+    };
+    return withQueryEngine((engine) => engine.dependencies(target, direction));
+  });
+  app.get("/api/impact", async (request) => {
+    const { target = "", depth } = request.query as {
+      target?: string;
+      depth?: string;
+    };
+    return withQueryEngine((engine) =>
+      engine.impact(target, depth ? Number(depth) : undefined),
+    );
+  });
+  app.get("/api/flow", async (request) => {
+    const { target = "", depth } = request.query as {
+      target?: string;
+      depth?: string;
+    };
+    return withQueryEngine((engine) =>
+      engine.flow(target, depth ? Number(depth) : undefined),
+    );
   });
   app.get("/", async () => {
     try {
