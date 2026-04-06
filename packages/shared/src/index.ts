@@ -17,6 +17,46 @@ export type EdgeType =
 
 export type SearchKind = "symbol" | "route" | "file" | "package";
 export type DependencyDirection = "in" | "out" | "both";
+export type UnitLanguage = "js-ts" | "unknown";
+export type UnitKind =
+  | "project"
+  | "repo"
+  | "app"
+  | "service"
+  | "package"
+  | "subproject";
+export type IndexingMode = "full" | "shallow" | "skipped";
+
+export interface PluginProvenance {
+  pluginId: string;
+  pluginVersion: string;
+  confidence: number;
+}
+
+export interface PluginMatch extends PluginProvenance {
+  kind:
+    | "workspace-detector"
+    | "language-plugin"
+    | "framework-plugin"
+    | "linker";
+  matched: boolean;
+  reasons: string[];
+}
+
+export interface DiscoveredUnit {
+  id: string;
+  rootPath: string;
+  displayName: string;
+  kind: UnitKind;
+  language: UnitLanguage;
+  tooling: string;
+  indexingMode: IndexingMode;
+  confidence: number;
+  signals: string[];
+  sourceRoots: string[];
+  parentUnitId?: string;
+  pluginMatches: PluginMatch[];
+}
 
 export interface SearchItem {
   id: string;
@@ -34,7 +74,9 @@ export interface RouteItem {
   handlerSymbolId: string;
   filePath: string;
   framework: string;
+  unitId: string;
   confidence: number;
+  provenance?: PluginProvenance;
 }
 
 export interface GraphItem {
@@ -53,6 +95,15 @@ export interface GraphTraceConfig {
   workspaceGlobs: string[];
   exclude: string[];
   frameworks: string[];
+  detection: {
+    mode: "auto";
+    maxDepth: number;
+    minUnitConfidence: number;
+  };
+  plugins: {
+    disable: string[];
+    prefer: string[];
+  };
   search: {
     embeddingsProvider: "none" | "ollama" | "openai";
     embeddingsModel: string | null;
@@ -82,6 +133,7 @@ export interface GraphTraceStatus {
   workspaceRoot: string;
   dbPath: string;
   counts: IndexSummary;
+  units: DiscoveredUnit[];
   lastIndexRun: IndexRunInfo | null;
 }
 
@@ -95,6 +147,10 @@ export interface IndexWorkspaceOptions {
 export interface IndexWorkspaceResult {
   dbPath: string;
   summary: IndexSummary;
+  units: DiscoveredUnit[];
+  explain: {
+    units: DiscoveredUnit[];
+  };
 }
 
 export interface CliRunOptions {

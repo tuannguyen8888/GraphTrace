@@ -1,7 +1,7 @@
 {
   "name": "graphtrace",
-  "version": "0.1.1",
-  "description": "Local-first code graph for JS/TS monorepos with CLI, MCP, and local web UI.",
+  "version": "1.0.0",
+  "description": "Local-first code graph for JS/TS projects with CLI, MCP, and local web UI.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

@@ -35,6 +35,26 @@ describe("cli", () => {
     expect(result.stdout).toContain("pnpm:");
   });
 
+  test("doctor --units reports discovered units for non-standard layouts", async () => {
+    const result = await runCli(["doctor", "--units"], {
+      cwd: join(process.cwd(), "fixtures", "backend-frontend-workspace"),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('"rootPath": "backend"');
+    expect(result.stdout).toContain('"rootPath": "frontend"');
+  });
+
+  test("doctor --plugins reports matched plugins for discovered units", async () => {
+    const result = await runCli(["doctor", "--plugins"], {
+      cwd: join(process.cwd(), "fixtures", "next-api-workspace"),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('"pluginId": "framework:next"');
+    expect(result.stdout).toContain('"pluginId": "language:js-ts"');
+  });
+
   test("index supports --json and status reports workspace/index metadata", async () => {
     await ensureWorkspaceInitialized(fixtureRoot);
 
@@ -54,6 +74,7 @@ describe("cli", () => {
     const statusPayload = JSON.parse(status.stdout) as {
       workspaceRoot: string;
       dbPath: string;
+      units: Array<{ rootPath: string }>;
       counts: {
         packageCount: number;
         fileCount: number;
@@ -75,8 +96,33 @@ describe("cli", () => {
     expect(statusPayload.dbPath).toBe(indexedPayload.dbPath);
     expect(statusPayload.counts.packageCount).toBeGreaterThanOrEqual(2);
     expect(statusPayload.counts.fileCount).toBeGreaterThan(0);
+    expect(statusPayload.units.length).toBeGreaterThan(0);
     expect(statusPayload.lastIndexRun?.mode).toBe("full");
     expect(statusPayload.lastIndexRun?.completedAt).toBeTruthy();
+  });
+
+  test("index --explain returns discovered unit details", async () => {
+    const result = await runCli(["index", "--full", "--explain"], {
+      cwd: join(process.cwd(), "fixtures", "mixed-workspace"),
+    });
+
+    const payload = JSON.parse(result.stdout) as {
+      units: Array<{ rootPath: string; indexingMode: string }>;
+    };
+
+    expect(result.exitCode).toBe(0);
+    expect(payload.units).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rootPath: "services/api",
+          indexingMode: "full",
+        }),
+        expect.objectContaining({
+          rootPath: "workers/python",
+          indexingMode: "shallow",
+        }),
+      ]),
+    );
   });
 
   test("routes filters by package when --package is provided", async () => {

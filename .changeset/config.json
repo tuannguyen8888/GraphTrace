@@ -2,7 +2,19 @@
   "$schema": "https://unpkg.com/@changesets/config@3.1.1/schema.json",
   "changelog": "@changesets/cli/changelog",
   "commit": false,
-  "fixed": [],
+  "fixed": [
+    [
+      "@graphtrace/web",
+      "graphtrace",
+      "@graphtrace/config",
+      "@graphtrace/indexer",
+      "@graphtrace/mcp",
+      "@graphtrace/query-engine",
+      "@graphtrace/server",
+      "@graphtrace/shared",
+      "@graphtrace/storage"
+    ]
+  ],
   "linked": [],
   "access": "public",
   "baseBranch": "main",

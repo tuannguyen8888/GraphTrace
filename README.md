@@ -5,7 +5,7 @@
 [![GitHub Release](https://img.shields.io/github/v/release/tuannguyen8888/GraphTrace)](https://github.com/tuannguyen8888/GraphTrace/releases)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 
-GraphTrace is a local-first code graph for JavaScript and TypeScript monorepos.
+GraphTrace is a local-first code graph for JavaScript and TypeScript projects.
 
 It indexes code into a local SQLite graph store, then exposes the same query layer through:
 
@@ -17,11 +17,12 @@ The goal is simple: make a codebase easier to understand, safer to change, and e
 
 ## What You Can Use Today
 
-GraphTrace is now usable as a local alpha for JS/TS monorepos.
+GraphTrace now supports JS/TS projects with automatic unit discovery.
 
 Current capabilities include:
 
 - workspace initialization and health checks
+- automatic unit discovery across flat repos, monorepos, and mixed project roots
 - full and incremental indexing into a local SQLite-backed graph store
 - foreground watch mode with stale cleanup on add, change, and delete
 - search, dependency tracing, impact analysis, route flow, and workspace status
@@ -71,6 +72,7 @@ Build the local index:
 
 ```bash
 graphtrace index --full
+graphtrace index --full --explain
 ```
 
 Check workspace/index state:
@@ -78,6 +80,8 @@ Check workspace/index state:
 ```bash
 graphtrace status
 graphtrace status --json
+graphtrace doctor --units
+graphtrace doctor --plugins
 ```
 
 Run incremental watch mode:

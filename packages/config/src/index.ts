@@ -20,6 +20,26 @@ const configSchema = z.object({
   frameworks: z
     .array(z.string())
     .default(["express", "fastify", "nest", "next", "prisma", "drizzle"]),
+  detection: z
+    .object({
+      mode: z.literal("auto").default("auto"),
+      maxDepth: z.number().int().positive().default(6),
+      minUnitConfidence: z.number().int().positive().default(60),
+    })
+    .default({
+      mode: "auto",
+      maxDepth: 6,
+      minUnitConfidence: 60,
+    }),
+  plugins: z
+    .object({
+      disable: z.array(z.string()).default([]),
+      prefer: z.array(z.string()).default([]),
+    })
+    .default({
+      disable: [],
+      prefer: [],
+    }),
   search: z
     .object({
       embeddingsProvider: z.enum(["none", "ollama", "openai"]).default("none"),
@@ -61,6 +81,14 @@ export async function ensureWorkspaceInitialized(
   const currentConfig = configSchema.parse({
     ...defaultGraphTraceConfig,
     ...overrides,
+    detection: {
+      ...defaultGraphTraceConfig.detection,
+      ...overrides.detection,
+    },
+    plugins: {
+      ...defaultGraphTraceConfig.plugins,
+      ...overrides.plugins,
+    },
     search: {
       ...defaultGraphTraceConfig.search,
       ...overrides.search,
@@ -98,6 +126,14 @@ export async function loadGraphTraceConfig(
   return configSchema.parse({
     ...defaultGraphTraceConfig,
     ...raw,
+    detection: {
+      ...defaultGraphTraceConfig.detection,
+      ...raw.detection,
+    },
+    plugins: {
+      ...defaultGraphTraceConfig.plugins,
+      ...raw.plugins,
+    },
     search: {
       ...defaultGraphTraceConfig.search,
       ...raw.search,

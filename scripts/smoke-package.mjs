@@ -6,6 +6,9 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+const EXEC_OPTIONS = {
+  maxBuffer: 1024 * 1024 * 20,
+};
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(scriptDir, "..");
@@ -30,6 +33,7 @@ try {
 
   await execFileAsync("pnpm", ["--dir", packageRoot, "build"], {
     cwd: repoRoot,
+    ...EXEC_OPTIONS,
   });
 
   await execFileAsync(
@@ -37,6 +41,7 @@ try {
     ["--dir", packageRoot, "pack", "--pack-destination", packDir],
     {
       cwd: repoRoot,
+      ...EXEC_OPTIONS,
     },
   );
 
@@ -49,20 +54,29 @@ try {
 
   await execFileAsync("npm", ["init", "-y"], {
     cwd: installDir,
+    ...EXEC_OPTIONS,
   });
   await execFileAsync("npm", ["install", tarballPath], {
     cwd: installDir,
+    ...EXEC_OPTIONS,
   });
 
   const cliBin = join(installDir, "node_modules", ".bin", "graphtrace");
 
-  await execFileAsync(cliBin, ["doctor"], { cwd: workspaceRoot });
-  await execFileAsync(cliBin, ["init"], { cwd: workspaceRoot });
+  await execFileAsync(cliBin, ["doctor"], {
+    cwd: workspaceRoot,
+    ...EXEC_OPTIONS,
+  });
+  await execFileAsync(cliBin, ["init"], {
+    cwd: workspaceRoot,
+    ...EXEC_OPTIONS,
+  });
   const indexResult = await execFileAsync(
     cliBin,
     ["index", "--full", "--json"],
     {
       cwd: workspaceRoot,
+      ...EXEC_OPTIONS,
     },
   );
   const indexPayload = JSON.parse(indexResult.stdout);
@@ -73,7 +87,10 @@ try {
   const searchResult = await execFileAsync(
     cliBin,
     ["search", "users", "--kind", "route"],
-    { cwd: workspaceRoot },
+    {
+      cwd: workspaceRoot,
+      ...EXEC_OPTIONS,
+    },
   );
   const searchPayload = JSON.parse(searchResult.stdout);
   if (

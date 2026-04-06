@@ -41,6 +41,7 @@ jobs:
       - name: Version or publish
         uses: changesets/action@v1
         with:
+          version: pnpm release:version
           publish: pnpm publish -r --access public --no-git-checks
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -14,16 +14,32 @@ describe("storage", () => {
     );
 
     try {
+      store.upsertUnit({
+        id: "unit:apps/api",
+        rootPath: "apps/api",
+        displayName: "@fixture/api",
+        kind: "app",
+        language: "js-ts",
+        tooling: "pnpm",
+        indexingMode: "full",
+        confidence: 95,
+        signals: ["package.json"],
+        sourceRoots: ["apps/api/src"],
+        pluginMatches: [],
+      });
+
       store.upsertPackage({
         id: "package:apps/api",
         name: "@fixture/api",
         rootPath: "apps/api",
+        unitId: "unit:apps/api",
       });
 
       store.upsertFile({
         id: "file:apps/api/src/routes/users.ts",
         path: "apps/api/src/routes/users.ts",
         packageId: "package:apps/api",
+        unitId: "unit:apps/api",
         hash: "hash",
       });
 

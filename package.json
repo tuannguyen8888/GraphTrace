@@ -1,6 +1,6 @@
 {
   "name": "graphtrace-workspace",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.30.1",
@@ -12,7 +12,9 @@
     "changeset": "changeset",
     "lint": "biome check .",
     "format": "biome check --write .",
+    "release:check-versions": "tsx scripts/sync-workspace-version.ts --check",
     "release:status": "changeset status",
+    "release:version": "changeset version && tsx scripts/sync-workspace-version.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:smoke": "node ./scripts/smoke-package.mjs",

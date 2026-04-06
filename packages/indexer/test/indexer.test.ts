@@ -12,6 +12,17 @@ const nestFixtureRoot = join(
   "nest-drizzle-workspace",
 );
 const fastifyFixtureRoot = join(process.cwd(), "fixtures", "fastify-workspace");
+const rootSrcFixtureRoot = join(
+  process.cwd(),
+  "fixtures",
+  "root-src-workspace",
+);
+const backendFrontendFixtureRoot = join(
+  process.cwd(),
+  "fixtures",
+  "backend-frontend-workspace",
+);
+const mixedFixtureRoot = join(process.cwd(), "fixtures", "mixed-workspace");
 
 describe("indexWorkspace", () => {
   test("indexes packages, symbols, routes, and query edges from the fixture workspace", async () => {
@@ -62,5 +73,77 @@ describe("indexWorkspace", () => {
     });
 
     expect(result.summary.routeCount).toBe(1);
+  });
+
+  test("indexes root src workspaces without apps or packages folders", async () => {
+    await ensureWorkspaceInitialized(rootSrcFixtureRoot);
+
+    const result = await indexWorkspace({
+      workspaceRoot: rootSrcFixtureRoot,
+      full: true,
+    });
+
+    expect(result.summary.fileCount).toBeGreaterThanOrEqual(1);
+    expect(result.summary.routeCount).toBe(1);
+    expect(result.units).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rootPath: ".",
+          language: "js-ts",
+          indexingMode: "full",
+        }),
+      ]),
+    );
+  });
+
+  test("discovers sibling backend and frontend units dynamically", async () => {
+    await ensureWorkspaceInitialized(backendFrontendFixtureRoot);
+
+    const result = await indexWorkspace({
+      workspaceRoot: backendFrontendFixtureRoot,
+      full: true,
+    });
+
+    expect(result.summary.fileCount).toBeGreaterThanOrEqual(2);
+    expect(result.summary.routeCount).toBe(1);
+    expect(result.units).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rootPath: "backend",
+          language: "js-ts",
+          indexingMode: "full",
+        }),
+        expect.objectContaining({
+          rootPath: "frontend",
+          language: "js-ts",
+          indexingMode: "full",
+        }),
+      ]),
+    );
+  });
+
+  test("keeps non-js units as shallow metadata while indexing js-ts units deeply", async () => {
+    await ensureWorkspaceInitialized(mixedFixtureRoot);
+
+    const result = await indexWorkspace({
+      workspaceRoot: mixedFixtureRoot,
+      full: true,
+    });
+
+    expect(result.summary.fileCount).toBeGreaterThanOrEqual(1);
+    expect(result.units).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rootPath: "services/api",
+          language: "js-ts",
+          indexingMode: "full",
+        }),
+        expect.objectContaining({
+          rootPath: "workers/python",
+          language: "unknown",
+          indexingMode: "shallow",
+        }),
+      ]),
+    );
   });
 });

@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import type {
   DependencyDirection,
+  DiscoveredUnit,
   GraphItem,
   IndexRunInfo,
   QueryResult,
@@ -11,7 +12,7 @@ import type {
   SearchItem,
 } from "@graphtrace/shared";
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 interface EdgeRow {
   type: string;
@@ -29,7 +30,9 @@ interface RouteRow {
   handler_symbol_id: string;
   file_path: string;
   framework: string;
+  unit_id: string;
   confidence: number;
+  metadata_json: string | null;
 }
 
 export class GraphStore {
@@ -48,6 +51,7 @@ export class GraphStore {
   reset(): void {
     this.db.exec(`
       DELETE FROM packages;
+      DELETE FROM units;
       DELETE FROM files;
       DELETE FROM symbols;
       DELETE FROM routes;
@@ -137,14 +141,101 @@ export class GraphStore {
     };
   }
 
-  upsertPackage(record: { id: string; name: string; rootPath: string }): void {
+  upsertUnit(record: DiscoveredUnit): void {
     this.db
       .prepare(`
-        INSERT INTO packages (id, name, root_path)
-        VALUES (?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET name = excluded.name, root_path = excluded.root_path
+        INSERT INTO units (
+          id,
+          root_path,
+          display_name,
+          kind,
+          language,
+          tooling,
+          indexing_mode,
+          confidence,
+          parent_unit_id,
+          signals_json,
+          source_roots_json,
+          plugin_matches_json
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          root_path = excluded.root_path,
+          display_name = excluded.display_name,
+          kind = excluded.kind,
+          language = excluded.language,
+          tooling = excluded.tooling,
+          indexing_mode = excluded.indexing_mode,
+          confidence = excluded.confidence,
+          parent_unit_id = excluded.parent_unit_id,
+          signals_json = excluded.signals_json,
+          source_roots_json = excluded.source_roots_json,
+          plugin_matches_json = excluded.plugin_matches_json
       `)
-      .run(record.id, record.name, record.rootPath);
+      .run(
+        record.id,
+        record.rootPath,
+        record.displayName,
+        record.kind,
+        record.language,
+        record.tooling,
+        record.indexingMode,
+        record.confidence,
+        record.parentUnitId ?? null,
+        JSON.stringify(record.signals),
+        JSON.stringify(record.sourceRoots),
+        JSON.stringify(record.pluginMatches),
+      );
+  }
+
+  units(): DiscoveredUnit[] {
+    return (
+      this.db.prepare("SELECT * FROM units ORDER BY root_path").all() as Array<{
+        id: string;
+        root_path: string;
+        display_name: string;
+        kind: DiscoveredUnit["kind"];
+        language: DiscoveredUnit["language"];
+        tooling: string;
+        indexing_mode: DiscoveredUnit["indexingMode"];
+        confidence: number;
+        parent_unit_id: string | null;
+        signals_json: string;
+        source_roots_json: string;
+        plugin_matches_json: string;
+      }>
+    ).map((row) => ({
+      id: row.id,
+      rootPath: row.root_path,
+      displayName: row.display_name,
+      kind: row.kind,
+      language: row.language,
+      tooling: row.tooling,
+      indexingMode: row.indexing_mode,
+      confidence: row.confidence,
+      parentUnitId: row.parent_unit_id ?? undefined,
+      signals: JSON.parse(row.signals_json),
+      sourceRoots: JSON.parse(row.source_roots_json),
+      pluginMatches: JSON.parse(row.plugin_matches_json),
+    }));
+  }
+
+  upsertPackage(record: {
+    id: string;
+    name: string;
+    rootPath: string;
+    unitId: string;
+  }): void {
+    this.db
+      .prepare(`
+        INSERT INTO packages (id, name, root_path, unit_id)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          name = excluded.name,
+          root_path = excluded.root_path,
+          unit_id = excluded.unit_id
+      `)
+      .run(record.id, record.name, record.rootPath, record.unitId);
     this.upsertSearchEntry({
       kind: "package",
       id: record.id,
@@ -157,15 +248,26 @@ export class GraphStore {
     id: string;
     path: string;
     packageId: string;
+    unitId: string;
     hash: string;
   }): void {
     this.db
       .prepare(`
-        INSERT INTO files (id, path, package_id, hash, tsconfig_context)
-        VALUES (?, ?, ?, ?, '')
-        ON CONFLICT(id) DO UPDATE SET path = excluded.path, package_id = excluded.package_id, hash = excluded.hash
+        INSERT INTO files (id, path, package_id, unit_id, hash, tsconfig_context)
+        VALUES (?, ?, ?, ?, ?, '')
+        ON CONFLICT(id) DO UPDATE SET
+          path = excluded.path,
+          package_id = excluded.package_id,
+          unit_id = excluded.unit_id,
+          hash = excluded.hash
       `)
-      .run(record.id, record.path, record.packageId, record.hash);
+      .run(
+        record.id,
+        record.path,
+        record.packageId,
+        record.unitId,
+        record.hash,
+      );
     this.upsertSearchEntry({
       kind: "file",
       id: record.id,
@@ -206,8 +308,19 @@ export class GraphStore {
   upsertRoute(record: RouteItem): void {
     this.db
       .prepare(`
-        INSERT INTO routes (id, method, path, handler_name, handler_symbol_id, file_path, framework, confidence)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO routes (
+          id,
+          method,
+          path,
+          handler_name,
+          handler_symbol_id,
+          file_path,
+          framework,
+          unit_id,
+          confidence,
+          metadata_json
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           method = excluded.method,
           path = excluded.path,
@@ -215,7 +328,9 @@ export class GraphStore {
           handler_symbol_id = excluded.handler_symbol_id,
           file_path = excluded.file_path,
           framework = excluded.framework,
-          confidence = excluded.confidence
+          unit_id = excluded.unit_id,
+          confidence = excluded.confidence,
+          metadata_json = excluded.metadata_json
       `)
       .run(
         record.id,
@@ -225,7 +340,9 @@ export class GraphStore {
         record.handlerSymbolId,
         record.filePath,
         record.framework,
+        record.unitId,
         record.confidence,
+        record.provenance ? JSON.stringify(record.provenance) : null,
       );
     this.upsertSearchEntry({
       kind: "route",
@@ -362,7 +479,9 @@ export class GraphStore {
       handlerSymbolId: row.handler_symbol_id,
       filePath: row.file_path,
       framework: row.framework,
+      unitId: row.unit_id,
       confidence: row.confidence,
+      provenance: row.metadata_json ? JSON.parse(row.metadata_json) : undefined,
     };
   }
 
@@ -647,6 +766,7 @@ export class GraphStore {
     if (currentVersion !== SCHEMA_VERSION) {
       this.db.exec(`
         DROP TABLE IF EXISTS packages;
+        DROP TABLE IF EXISTS units;
         DROP TABLE IF EXISTS files;
         DROP TABLE IF EXISTS symbols;
         DROP TABLE IF EXISTS routes;
@@ -662,13 +782,30 @@ export class GraphStore {
       CREATE TABLE IF NOT EXISTS packages (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
-        root_path TEXT NOT NULL UNIQUE
+        root_path TEXT NOT NULL UNIQUE,
+        unit_id TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS units (
+        id TEXT PRIMARY KEY,
+        root_path TEXT NOT NULL UNIQUE,
+        display_name TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        language TEXT NOT NULL,
+        tooling TEXT NOT NULL,
+        indexing_mode TEXT NOT NULL,
+        confidence REAL NOT NULL,
+        parent_unit_id TEXT,
+        signals_json TEXT NOT NULL,
+        source_roots_json TEXT NOT NULL,
+        plugin_matches_json TEXT NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS files (
         id TEXT PRIMARY KEY,
         path TEXT NOT NULL UNIQUE,
         package_id TEXT NOT NULL,
+        unit_id TEXT NOT NULL,
         hash TEXT NOT NULL,
         tsconfig_context TEXT NOT NULL
       );
@@ -689,7 +826,9 @@ export class GraphStore {
         handler_symbol_id TEXT NOT NULL,
         file_path TEXT NOT NULL,
         framework TEXT NOT NULL,
-        confidence REAL NOT NULL
+        unit_id TEXT NOT NULL,
+        confidence REAL NOT NULL,
+        metadata_json TEXT
       );
 
       CREATE TABLE IF NOT EXISTS edges (
