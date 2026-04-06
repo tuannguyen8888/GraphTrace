@@ -18,14 +18,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.30.1
+
       - uses: actions/setup-node@v4
         with:
           node-version-file: ".nvmrc"
           cache: "pnpm"
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.30.1
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -40,4 +40,3 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-
