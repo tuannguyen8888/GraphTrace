@@ -1,5 +1,16 @@
 # graphtrace
 
+## 1.2.0
+
+### Minor Changes
+
+- Improve self-host reliability and investigation workflows across GraphTrace.
+
+  - avoid SQLITE busy errors during concurrent query access
+  - resolve internal workspace package dependencies more reliably on the GraphTrace repo
+  - add safer local-only agent bootstrap behavior and richer generated Codex GraphTrace guidance
+  - upgrade the self-host web UI with better triage controls, deeper inspector drill-down, and a bounded architecture graph view
+
 ## 1.1.0
 
 ### Minor Changes
