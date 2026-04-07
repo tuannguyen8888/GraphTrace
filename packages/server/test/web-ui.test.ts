@@ -13,10 +13,10 @@ import type {
   SearchResult,
 } from "../../../apps/web/src/view-model";
 import {
-  buildSearchWorkbenchGuidance,
   buildGraphTraceCommand,
   buildPackageEntries,
   buildRouteInsights,
+  buildSearchWorkbenchGuidance,
   filterRoutesForDisplay,
   filterSearchResultsForDisplay,
   matchesScope,
@@ -161,7 +161,8 @@ describe("web ui view-model", () => {
       "fixtures/express-prisma-workspace",
     ]);
     expect(
-      resolveRepositoryForPath("packages/server/src/index.ts", repositories)?.id,
+      resolveRepositoryForPath("packages/server/src/index.ts", repositories)
+        ?.id,
     ).toBe(".");
     expect(
       resolveRepositoryForPath(
@@ -247,7 +248,12 @@ describe("web ui view-model", () => {
   test("filters search results by scope", () => {
     const repositories = deriveRepositories(units);
     expect(
-      filterSearchResultsForDisplay(searchResults, "primary", repositories, "."),
+      filterSearchResultsForDisplay(
+        searchResults,
+        "primary",
+        repositories,
+        ".",
+      ),
     ).toHaveLength(1);
     expect(filterSearchResultsForDisplay(searchResults, "tests")).toHaveLength(
       1,

@@ -153,7 +153,11 @@ export function createGraphTraceApp(
     );
   });
   app.get("/api/impact", async (request) => {
-    const { target = "", depth, repository } = request.query as {
+    const {
+      target = "",
+      depth,
+      repository,
+    } = request.query as {
       target?: string;
       depth?: string;
       repository?: string;
@@ -169,14 +173,22 @@ export function createGraphTraceApp(
     );
   });
   app.get("/api/flow", async (request) => {
-    const { target = "", depth, repository } = request.query as {
+    const {
+      target = "",
+      depth,
+      repository,
+    } = request.query as {
       target?: string;
       depth?: string;
       repository?: string;
     };
     return withQueryEngine((engine) =>
       repository
-        ? engine.flowByRepository(repository, target, depth ? Number(depth) : undefined)
+        ? engine.flowByRepository(
+            repository,
+            target,
+            depth ? Number(depth) : undefined,
+          )
         : engine.flow(target, depth ? Number(depth) : undefined),
     );
   });

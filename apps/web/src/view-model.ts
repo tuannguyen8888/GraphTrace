@@ -228,7 +228,11 @@ export function filterSearchResultsForDisplay(
       return true;
     }
 
-    return pathBelongsToRepository(item.path, selectedRepositoryId, repositories);
+    return pathBelongsToRepository(
+      item.path,
+      selectedRepositoryId,
+      repositories,
+    );
   });
 }
 
@@ -274,12 +278,16 @@ export function buildSearchWorkbenchGuidance(
     repositories,
     selectedRepositoryId,
   );
-  const visibleRoutes = filterRoutesForDisplay(options.routes, options.packages, {
-    repositories,
-    selectedRepositoryId,
-    scopeMode: options.scopeMode,
-    selectedPackageId: options.selectedPackageId,
-  });
+  const visibleRoutes = filterRoutesForDisplay(
+    options.routes,
+    options.packages,
+    {
+      repositories,
+      selectedRepositoryId,
+      scopeMode: options.scopeMode,
+      selectedPackageId: options.selectedPackageId,
+    },
+  );
   const selectedPackage =
     options.packages.find((entry) => entry.id === options.selectedPackageId) ??
     null;
@@ -288,9 +296,9 @@ export function buildSearchWorkbenchGuidance(
     selectedPackage ??
     (anchorRoute
       ? findOwningPackage(anchorRoute.filePath, options.packages)
-      : visiblePackages.find((entry) => entry.path && entry.path !== ".") ??
+      : (visiblePackages.find((entry) => entry.path && entry.path !== ".") ??
         visiblePackages[0] ??
-        null);
+        null));
   const anchorFilePath =
     anchorRoute?.filePath ??
     (selectedPackage?.path && selectedPackage.path !== "."
@@ -326,7 +334,8 @@ export function buildSearchWorkbenchGuidance(
       kind: "file",
       label: `Mở file ${anchorFilePath}`,
       query: anchorFilePath,
-      reason: "File search phù hợp khi cần mở đúng entrypoint hoặc handler path.",
+      reason:
+        "File search phù hợp khi cần mở đúng entrypoint hoặc handler path.",
     });
   }
 

@@ -1,15 +1,15 @@
 import {
   Background,
   Controls,
+  type Edge,
   Handle,
   MiniMap,
-  Position,
-  ReactFlow,
-  ReactFlowProvider,
-  type Edge,
   type Node,
   type NodeProps,
+  Position,
+  ReactFlow,
   type ReactFlowInstance,
+  ReactFlowProvider,
   useEdgesState,
   useNodesState,
 } from "@xyflow/react";
@@ -61,8 +61,10 @@ function GraphWorkspaceInner(props: GraphWorkspaceProps) {
   const [graphSearchText, setGraphSearchText] = useState("");
   const [highlightedNodeId, setHighlightedNodeId] = useState("");
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [reactFlowInstance, setReactFlowInstance] =
-    useState<ReactFlowInstance<GraphFlowNode, GraphFlowEdge> | null>(null);
+  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance<
+    GraphFlowNode,
+    GraphFlowEdge
+  > | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -70,7 +72,13 @@ function GraphWorkspaceInner(props: GraphWorkspaceProps) {
     setFlowEdges(createFlowEdges(props.graph.edges));
     setGraphSearchText("");
     setHighlightedNodeId("");
-  }, [props.graph.edges, props.graph.focusId, props.nodes, setFlowEdges, setFlowNodes]);
+  }, [
+    props.graph.edges,
+    props.graph.focusId,
+    props.nodes,
+    setFlowEdges,
+    setFlowNodes,
+  ]);
 
   useEffect(() => {
     setFlowNodes((currentNodes) =>
@@ -120,7 +128,9 @@ function GraphWorkspaceInner(props: GraphWorkspaceProps) {
   return (
     <div
       ref={containerRef}
-      className={isFullscreen ? "graph-workspace is-fullscreen" : "graph-workspace"}
+      className={
+        isFullscreen ? "graph-workspace is-fullscreen" : "graph-workspace"
+      }
     >
       <div className="graph-workspace-toolbar">
         <label className="field grow">
@@ -284,14 +294,24 @@ function GraphCanvasNode(props: NodeProps<GraphFlowNode>) {
       <Handle type="target" position={Position.Left} className="graph-handle" />
       <span className="graph-node-kind">{props.data.item.kind}</span>
       <span className="graph-node-label">
-        {truncateGraphLabel(props.data.item.label, props.data.isFocus ? 40 : 32)}
+        {truncateGraphLabel(
+          props.data.item.label,
+          props.data.isFocus ? 40 : 32,
+        )}
       </span>
       {props.data.item.path ? (
         <span className="graph-node-path">
-          {truncateGraphLabel(props.data.item.path, props.data.isFocus ? 42 : 34)}
+          {truncateGraphLabel(
+            props.data.item.path,
+            props.data.isFocus ? 42 : 34,
+          )}
         </span>
       ) : null}
-      <Handle type="source" position={Position.Right} className="graph-handle" />
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="graph-handle"
+      />
     </div>
   );
 }

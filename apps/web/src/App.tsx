@@ -18,10 +18,10 @@ import {
   type ScopeMode,
   type SearchResult,
   type WorkspaceStatus,
-  buildSearchWorkbenchGuidance,
   buildGraphTraceCommand,
   buildPackageEntries,
   buildRouteInsights,
+  buildSearchWorkbenchGuidance,
   filterRoutesForDisplay,
   filterSearchResultsForDisplay,
   findOwningPackage,
@@ -116,17 +116,20 @@ export function App() {
     repositories,
     selectedRepositoryId,
   );
-  const visibleRouteFlow = routeFlow.filter((item) =>
-    matchesScope(item.path, scopeMode) &&
-    pathBelongsToRepository(item.path, selectedRepositoryId, repositories),
+  const visibleRouteFlow = routeFlow.filter(
+    (item) =>
+      matchesScope(item.path, scopeMode) &&
+      pathBelongsToRepository(item.path, selectedRepositoryId, repositories),
   );
-  const visibleDependencyItems = dependencyItems.filter((item) =>
-    matchesScope(item.path, scopeMode) &&
-    pathBelongsToRepository(item.path, selectedRepositoryId, repositories),
+  const visibleDependencyItems = dependencyItems.filter(
+    (item) =>
+      matchesScope(item.path, scopeMode) &&
+      pathBelongsToRepository(item.path, selectedRepositoryId, repositories),
   );
-  const visibleImpactItems = impactItems.filter((item) =>
-    matchesScope(item.path, scopeMode) &&
-    pathBelongsToRepository(item.path, selectedRepositoryId, repositories),
+  const visibleImpactItems = impactItems.filter(
+    (item) =>
+      matchesScope(item.path, scopeMode) &&
+      pathBelongsToRepository(item.path, selectedRepositoryId, repositories),
   );
   const routeInsights = buildRouteInsights(visibleRouteFlow, packages);
   const searchWorkbench = buildSearchWorkbenchGuidance({
@@ -190,9 +193,10 @@ export function App() {
 
     const loadWorkspaceData = async () => {
       try {
+        const refreshQuery = buildRefreshQuery(refreshNonce);
         const repositoriesPayload = await fetchJson<
           QueryResult<RepositorySummary>
-        >("/api/repositories");
+        >(`/api/repositories${refreshQuery}`);
         const availableRepositories = repositoriesPayload.items ?? [];
         const nextRepositoryId =
           availableRepositories.find(
@@ -201,13 +205,18 @@ export function App() {
           availableRepositories[0]?.id ??
           ".";
         const repositoryQuery = buildRepositoryQuery(nextRepositoryId);
+        const refreshSuffix = buildRefreshQuery(refreshNonce, true);
         const [statusPayload, packagesPayload, routesPayload] =
           await Promise.all([
-            fetchJson<WorkspaceStatus>(`/api/status${repositoryQuery}`),
-            fetchJson<QueryResult<PackageSummary>>(
-              `/api/packages${repositoryQuery}`,
+            fetchJson<WorkspaceStatus>(
+              `/api/status${repositoryQuery}${refreshSuffix}`,
             ),
-            fetchJson<QueryResult<RouteSummary>>(`/api/routes${repositoryQuery}`),
+            fetchJson<QueryResult<PackageSummary>>(
+              `/api/packages${repositoryQuery}${refreshSuffix}`,
+            ),
+            fetchJson<QueryResult<RouteSummary>>(
+              `/api/routes${repositoryQuery}${refreshSuffix}`,
+            ),
           ]);
 
         if (cancelled) {
@@ -285,11 +294,12 @@ export function App() {
       setDetailLoading(true);
       setDetailError("");
       const repositoryQuery = buildRepositoryQuery(selectedRepositoryId, true);
+      const refreshSuffix = buildRefreshQuery(refreshNonce, true);
 
       try {
         if (inspector.type === "route") {
           const flowPayload = await fetchJson<QueryResult<GraphItem>>(
-            `/api/flow?target=${encodeURIComponent(inspector.route.id)}${repositoryQuery}`,
+            `/api/flow?target=${encodeURIComponent(inspector.route.id)}${repositoryQuery}${refreshSuffix}`,
           );
 
           if (cancelled) {
@@ -307,10 +317,10 @@ export function App() {
         ) {
           const [depsPayload, impactPayload] = await Promise.all([
             fetchJson<QueryResult<GraphItem>>(
-              `/api/deps?target=${encodeURIComponent(inspector.item.path)}&direction=both&depth=2${repositoryQuery}`,
+              `/api/deps?target=${encodeURIComponent(inspector.item.path)}&direction=both&depth=2${repositoryQuery}${refreshSuffix}`,
             ),
             fetchJson<QueryResult<GraphItem>>(
-              `/api/impact?target=${encodeURIComponent(inspector.item.path)}&depth=4${repositoryQuery}`,
+              `/api/impact?target=${encodeURIComponent(inspector.item.path)}&depth=4${repositoryQuery}${refreshSuffix}`,
             ),
           ]);
 
@@ -396,7 +406,13 @@ export function App() {
       searchKind,
       searchText,
     });
-  }, [scopeMode, searchKind, searchText, selectedPackageId, selectedRepositoryId]);
+  }, [
+    scopeMode,
+    searchKind,
+    searchText,
+    selectedPackageId,
+    selectedRepositoryId,
+  ]);
 
   const relatedPackageItems = routeInsights.relatedPackages.map((entry) => ({
     id: entry.id,
@@ -1317,6 +1333,10 @@ function buildRepositoryQuery(repositoryId: string, hasExistingQuery = false) {
   }
 
   return `${hasExistingQuery ? "&" : "?"}repository=${encodeURIComponent(repositoryId)}`;
+}
+
+function buildRefreshQuery(refreshNonce: number, hasExistingQuery = false) {
+  return `${hasExistingQuery ? "&" : "?"}refresh=${refreshNonce}`;
 }
 
 function syncUiStateToLocation(state: {

@@ -372,10 +372,7 @@ export function searchArchitectureGraphNodes(
     });
 }
 
-function graphNodeSize(
-  node: ArchitectureGraphNode,
-  focusId: string,
-) {
+function graphNodeSize(node: ArchitectureGraphNode, focusId: string) {
   if (node.id === focusId) {
     return { width: 280, height: 112 };
   }

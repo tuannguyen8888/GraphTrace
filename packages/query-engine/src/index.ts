@@ -78,7 +78,11 @@ export function createQueryEngine(store: GraphStore) {
         lastIndexRun: store.lastIndexRun(),
       };
     },
-    statusByRepository(workspaceRoot: string, dbPath: string, repositoryId: string) {
+    statusByRepository(
+      workspaceRoot: string,
+      dbPath: string,
+      repositoryId: string,
+    ) {
       return {
         workspaceRoot,
         dbPath,
