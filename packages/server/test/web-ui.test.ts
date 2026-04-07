@@ -1,0 +1,193 @@
+import { describe, expect, test } from "vitest";
+
+import type {
+  GraphItem,
+  PackageSummary,
+  RouteSummary,
+  SearchResult,
+} from "../../../apps/web/src/view-model";
+import {
+  buildGraphTraceCommand,
+  buildPackageEntries,
+  buildRouteInsights,
+  filterRoutesForDisplay,
+  filterSearchResultsForDisplay,
+  matchesScope,
+} from "../../../apps/web/src/view-model";
+
+const packages: PackageSummary[] = [
+  {
+    id: "package:packages/server",
+    label: "@graphtrace/server",
+    path: "packages/server",
+  },
+  {
+    id: "package:fixtures/express-prisma-workspace/apps/api",
+    label: "@fixture/api",
+    path: "fixtures/express-prisma-workspace/apps/api",
+  },
+  {
+    id: "package:fixtures/mixed-workspace/services/api",
+    label: "@fixture/api",
+    path: "fixtures/mixed-workspace/services/api",
+  },
+  {
+    id: "package:packages/cli",
+    label: "graphtrace",
+    path: "packages/cli",
+  },
+];
+
+const routes: RouteSummary[] = [
+  {
+    id: "GET /api/impact",
+    method: "GET",
+    path: "/api/impact",
+    filePath: "packages/server/src/index.ts",
+    framework: "fastify",
+    confidence: 0.95,
+  },
+  {
+    id: "GET /users",
+    method: "GET",
+    path: "/users",
+    filePath: "fixtures/express-prisma-workspace/apps/api/src/routes/users.ts",
+    framework: "express",
+    confidence: 0.9,
+  },
+];
+
+const searchResults: SearchResult[] = [
+  {
+    id: "symbol:packages/server/src/index.ts#startGraphTraceServer",
+    kind: "symbol",
+    label: "startGraphTraceServer function packages/server/src/index.ts",
+    path: "packages/server/src/index.ts",
+  },
+  {
+    id: "symbol:fixtures/express-prisma-workspace/apps/api/src/server.ts#app_get_handler",
+    kind: "symbol",
+    label:
+      "app_get_handler function fixtures/express-prisma-workspace/apps/api/src/server.ts",
+    path: "fixtures/express-prisma-workspace/apps/api/src/server.ts",
+  },
+];
+
+describe("web ui view-model", () => {
+  test("filters fixtures out of the default primary scope but keeps them for tests scope", () => {
+    expect(matchesScope("packages/server/src/index.ts", "primary")).toBe(true);
+    expect(
+      matchesScope(
+        "fixtures/express-prisma-workspace/apps/api/src/routes/users.ts",
+        "primary",
+      ),
+    ).toBe(false);
+    expect(
+      matchesScope(
+        "fixtures/express-prisma-workspace/apps/api/src/routes/users.ts",
+        "tests",
+      ),
+    ).toBe(true);
+    expect(matchesScope("packages/cli/test/cli.test.ts", "tests")).toBe(true);
+  });
+
+  test("builds package entries with disambiguation for duplicate labels", () => {
+    const entries = buildPackageEntries(packages, "all");
+    const duplicateEntries = entries.filter((entry) => entry.label === "@fixture/api");
+
+    expect(duplicateEntries).toHaveLength(2);
+    expect(duplicateEntries.every((entry) => entry.disambiguation)).toBe(true);
+    expect(duplicateEntries.map((entry) => entry.secondaryLabel)).toEqual(
+      expect.arrayContaining([
+        "fixtures/express-prisma-workspace/apps/api",
+        "fixtures/mixed-workspace/services/api",
+      ]),
+    );
+  });
+
+  test("filters routes using package id rather than ambiguous package label", () => {
+    const serverRoutes = filterRoutesForDisplay(routes, packages, {
+      scopeMode: "all",
+      selectedPackageId: "package:packages/server",
+    });
+    const fixtureRoutes = filterRoutesForDisplay(routes, packages, {
+      scopeMode: "all",
+      selectedPackageId: "package:fixtures/express-prisma-workspace/apps/api",
+    });
+
+    expect(serverRoutes.map((route) => route.id)).toEqual(["GET /api/impact"]);
+    expect(fixtureRoutes.map((route) => route.id)).toEqual(["GET /users"]);
+  });
+
+  test("filters search results by scope", () => {
+    expect(filterSearchResultsForDisplay(searchResults, "primary")).toHaveLength(1);
+    expect(filterSearchResultsForDisplay(searchResults, "tests")).toHaveLength(1);
+    expect(filterSearchResultsForDisplay(searchResults, "all")).toHaveLength(2);
+  });
+
+  test("derives route insights for related packages and query hints", () => {
+    const flowItems: GraphItem[] = [
+      {
+        id: "GET /api/impact",
+        kind: "route",
+        label: "GET /api/impact",
+        path: "packages/server/src/index.ts",
+      },
+      {
+        id: "file:packages/server/src/index.ts",
+        kind: "file",
+        label: "packages/server/src/index.ts",
+        path: "packages/server/src/index.ts",
+      },
+      {
+        id: "query:packages/indexer/src/workspace.ts#db.select().from(",
+        kind: "query",
+        label: "db.select().from(",
+        path: "packages/indexer/src/workspace.ts",
+      },
+    ];
+
+    const insights = buildRouteInsights(flowItems, packages);
+
+    expect(insights.files.map((item) => item.path)).toEqual([
+      "packages/server/src/index.ts",
+    ]);
+    expect(insights.queryHints.map((item) => item.id)).toEqual([
+      "query:packages/indexer/src/workspace.ts#db.select().from(",
+    ]);
+    expect(insights.relatedPackages.map((item) => item.id)).toContain(
+      "package:packages/server",
+    );
+  });
+
+  test("builds actionable CLI commands for routes, files, and queries", () => {
+    expect(
+      buildGraphTraceCommand({
+        id: "GET /api/impact",
+        kind: "route",
+        label: "GET /api/impact",
+        path: "packages/server/src/index.ts",
+      }),
+    ).toBe('graphtrace flow "GET /api/impact" --depth 6');
+    expect(
+      buildGraphTraceCommand({
+        id: "file:packages/server/src/index.ts",
+        kind: "file",
+        label: "packages/server/src/index.ts",
+        path: "packages/server/src/index.ts",
+      }),
+    ).toBe(
+      'graphtrace deps "packages/server/src/index.ts" --direction both --depth 2',
+    );
+    expect(
+      buildGraphTraceCommand({
+        id: "query:packages/indexer/src/workspace.ts#db.select().from(",
+        kind: "query",
+        label: "db.select().from(",
+        path: "packages/indexer/src/workspace.ts",
+      }),
+    ).toBe(
+      'graphtrace deps "packages/indexer/src/workspace.ts" --direction both --depth 2',
+    );
+  });
+});
