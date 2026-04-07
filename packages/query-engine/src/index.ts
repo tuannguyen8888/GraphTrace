@@ -67,7 +67,10 @@ export function withWorkspaceQueryEngine<T>(
   action: (engine: ReturnType<typeof createQueryEngine>, dbPath: string) => T,
 ): T {
   const dbPath = join(workspaceRoot, GRAPHTRACE_DB_PATH);
-  const store = openGraphStore(dbPath);
+  const store = openGraphStore(dbPath, {
+    readOnly: true,
+    timeout: 2_000,
+  });
   const engine = createQueryEngine(store);
 
   try {

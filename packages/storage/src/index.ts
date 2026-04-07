@@ -35,12 +35,28 @@ interface RouteRow {
   metadata_json: string | null;
 }
 
+export interface GraphStoreOptions {
+  readOnly?: boolean;
+  timeout?: number;
+}
+
 export class GraphStore {
   readonly db: DatabaseSync;
 
-  constructor(readonly dbPath: string) {
+  constructor(
+    readonly dbPath: string,
+    private readonly options: GraphStoreOptions = {},
+  ) {
     mkdirSync(dirname(dbPath), { recursive: true });
-    this.db = new DatabaseSync(dbPath);
+    this.db = new DatabaseSync(dbPath, {
+      readOnly: options.readOnly ?? false,
+      timeout: options.timeout ?? 0,
+    });
+
+    if (options.readOnly) {
+      return;
+    }
+
     this.ensureSchema();
   }
 
@@ -868,6 +884,9 @@ export class GraphStore {
   }
 }
 
-export function openGraphStore(dbPath: string): GraphStore {
-  return new GraphStore(dbPath);
+export function openGraphStore(
+  dbPath: string,
+  options?: GraphStoreOptions,
+): GraphStore {
+  return new GraphStore(dbPath, options);
 }
