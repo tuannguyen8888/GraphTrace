@@ -42,7 +42,7 @@ const scopeOptions: Array<{
   {
     id: "primary",
     label: "Primary workspace",
-    description: "Ẩn fixtures để repo chính nổi bật hơn.",
+    description: "Ẩn fixtures và test-only noise để repo chính nổi bật hơn.",
   },
   {
     id: "all",

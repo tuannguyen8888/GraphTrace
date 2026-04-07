@@ -110,7 +110,7 @@ export function matchesScope(path: string | undefined, scopeMode: ScopeMode) {
     return itemScope === "fixture" || itemScope === "test";
   }
 
-  return itemScope !== "fixture";
+  return itemScope === "primary";
 }
 
 export function buildPackageEntries(
@@ -287,6 +287,13 @@ function compareByScopeAndLabel(
 
   if (leftScopeWeight !== rightScopeWeight) {
     return leftScopeWeight - rightScopeWeight;
+  }
+
+  const leftRootWeight = leftPath === "." ? 1 : 0;
+  const rightRootWeight = rightPath === "." ? 1 : 0;
+
+  if (leftRootWeight !== rightRootWeight) {
+    return leftRootWeight - rightRootWeight;
   }
 
   return leftLabel.localeCompare(rightLabel);
