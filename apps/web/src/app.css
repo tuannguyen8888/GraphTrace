@@ -223,8 +223,8 @@ a {
   background: rgba(255, 255, 255, 0.02);
   color: inherit;
   text-align: left;
-  transition: border-color 140ms ease, background 140ms ease,
-    transform 140ms ease;
+  transition: border-color 140ms ease, background 140ms ease, transform 140ms
+    ease;
 }
 
 .scope-option strong {
@@ -309,8 +309,7 @@ a {
       circle at top,
       rgba(87, 146, 255, 0.08),
       transparent 28%
-    ),
-    rgba(4, 10, 19, 0.88);
+    ), rgba(4, 10, 19, 0.88);
   overflow: auto;
 }
 
@@ -344,31 +343,37 @@ a {
   stroke-dasharray: 7 6;
 }
 
-.graph-node {
-  cursor: pointer;
+.graph-node-button {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  padding: 14px 18px;
+  border-radius: 22px;
+  border: 1.4px solid rgba(255, 255, 255, 0.09);
+  background: rgba(9, 19, 34, 0.95);
+  color: inherit;
+  text-align: left;
+  transition: border-color 140ms ease, transform 140ms ease, background 140ms
+    ease;
 }
 
-.graph-node rect {
-  fill: rgba(9, 19, 34, 0.95);
-  stroke: rgba(255, 255, 255, 0.09);
-  stroke-width: 1.4;
-  transition: stroke 140ms ease, transform 140ms ease, fill 140ms ease;
+.graph-node-button:hover,
+.graph-node-button:focus-visible,
+.graph-node-button.is-focus {
+  border-color: rgba(246, 180, 73, 0.42);
 }
 
-.graph-node:hover rect,
-.graph-node.is-focus rect {
-  stroke: rgba(246, 180, 73, 0.42);
-}
-
-.graph-node.is-focus rect {
-  fill: rgba(18, 31, 52, 0.96);
+.graph-node-button.is-focus {
+  background: rgba(18, 31, 52, 0.96);
 }
 
 .graph-node-kind,
 .graph-node-label,
 .graph-node-path {
+  display: block;
   font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
-  pointer-events: none;
 }
 
 .graph-node-kind {

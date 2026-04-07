@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
 
 import {
-  buildArchitectureGraph,
   type GraphEdgeFilters,
+  buildArchitectureGraph,
 } from "../../../apps/web/src/architecture-graph";
 import type {
   GraphItem,
@@ -114,10 +114,15 @@ const allEdges: GraphEdgeFilters = {
 
 describe("architecture graph", () => {
   test("builds a bounded route-centered graph with route, files, packages, and query hints", () => {
+    const selectedRoute = routes[0];
+    if (!selectedRoute) {
+      throw new Error("Expected a route fixture for graph tests.");
+    }
+
     const graph = buildArchitectureGraph({
       inspector: {
         type: "route",
-        route: routes[0]!,
+        route: selectedRoute,
       },
       packages,
       routes,
@@ -239,10 +244,7 @@ describe("architecture graph", () => {
 
     expect(graph.focusId).toBe("package:packages/server");
     expect(graph.nodes.map((node) => node.id)).toEqual(
-      expect.arrayContaining([
-        "package:packages/server",
-        "GET /api/impact",
-      ]),
+      expect.arrayContaining(["package:packages/server", "GET /api/impact"]),
     );
     expect(graph.edges.every((edge) => edge.kind !== "depends")).toBe(true);
     expect(graph.edges.every((edge) => edge.kind !== "impacts")).toBe(true);

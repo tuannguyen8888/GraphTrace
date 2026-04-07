@@ -1,21 +1,13 @@
 import { startTransition, useDeferredValue, useEffect, useState } from "react";
 
 import {
-  buildArchitectureGraph,
-  layoutArchitectureGraph,
   type ArchitectureGraphEdge,
   type ArchitectureGraphNode,
   type GraphEdgeFilters,
+  buildArchitectureGraph,
+  layoutArchitectureGraph,
 } from "./architecture-graph";
 import {
-  buildGraphTraceCommand,
-  buildPackageEntries,
-  buildRouteInsights,
-  filterRoutesForDisplay,
-  filterSearchResultsForDisplay,
-  findOwningPackage,
-  looksLikeSourcePath,
-  matchesScope,
   type GraphItem,
   type PackageListEntry,
   type PackageSummary,
@@ -24,6 +16,14 @@ import {
   type ScopeMode,
   type SearchResult,
   type WorkspaceStatus,
+  buildGraphTraceCommand,
+  buildPackageEntries,
+  buildRouteInsights,
+  filterRoutesForDisplay,
+  filterSearchResultsForDisplay,
+  findOwningPackage,
+  looksLikeSourcePath,
+  matchesScope,
 } from "./view-model";
 
 type InspectorMode =
@@ -146,6 +146,8 @@ export function App() {
       : "";
 
   useEffect(() => {
+    const refreshToken = refreshNonce;
+    void refreshToken;
     let cancelled = false;
 
     const loadWorkspaceData = async () => {
@@ -220,6 +222,8 @@ export function App() {
       return;
     }
 
+    const refreshToken = refreshNonce;
+    void refreshToken;
     let cancelled = false;
 
     const loadInspector = async () => {
@@ -382,7 +386,10 @@ export function App() {
             </div>
 
             <dl className="metric-grid">
-              <Metric label="Packages" value={status?.counts.packageCount ?? 0} />
+              <Metric
+                label="Packages"
+                value={status?.counts.packageCount ?? 0}
+              />
               <Metric label="Files" value={status?.counts.fileCount ?? 0} />
               <Metric label="Symbols" value={status?.counts.symbolCount ?? 0} />
               <Metric label="Routes" value={status?.counts.routeCount ?? 0} />
@@ -469,11 +476,15 @@ export function App() {
                       )
                     }
                   >
-                    <span className="list-chip">{formatScopeLabel(entry.scope)}</span>
+                    <span className="list-chip">
+                      {formatScopeLabel(entry.scope)}
+                    </span>
                     <span className="list-title">{entry.label}</span>
                     <span className="list-meta">{entry.secondaryLabel}</span>
                     {entry.disambiguation ? (
-                      <span className="list-subtle">Duplicate label, path used to disambiguate.</span>
+                      <span className="list-subtle">
+                        Duplicate label, path used to disambiguate.
+                      </span>
                     ) : null}
                   </button>
                 </li>
@@ -584,7 +595,10 @@ export function App() {
                   </li>
                 ) : (
                   visibleSearchResults.map((item) => {
-                    const owningPackage = findOwningPackage(item.path, packages);
+                    const owningPackage = findOwningPackage(
+                      item.path,
+                      packages,
+                    );
                     return (
                       <li key={`${item.kind}:${item.id}`}>
                         <button
@@ -595,7 +609,9 @@ export function App() {
                               : "list-item"
                           }
                           type="button"
-                          onClick={() => inspectSearchResult(item, routes, setInspector)}
+                          onClick={() =>
+                            inspectSearchResult(item, routes, setInspector)
+                          }
                         >
                           <span className="list-chip">{item.kind}</span>
                           <span className="list-title">{item.label}</span>
@@ -632,7 +648,10 @@ export function App() {
                   </li>
                 ) : (
                   visibleRoutes.map((route) => {
-                    const owningPackage = findOwningPackage(route.filePath, packages);
+                    const owningPackage = findOwningPackage(
+                      route.filePath,
+                      packages,
+                    );
                     return (
                       <li key={route.id}>
                         <button
@@ -657,7 +676,9 @@ export function App() {
                           <span className="route-meta-line">
                             <span>{route.framework}</span>
                             <span>{formatConfidence(route.confidence)}</span>
-                            <span>{owningPackage?.label ?? "unmapped package"}</span>
+                            <span>
+                              {owningPackage?.label ?? "unmapped package"}
+                            </span>
                           </span>
                           <span className="list-meta">{route.filePath}</span>
                         </button>
@@ -1051,29 +1072,33 @@ function ArchitectureGraphPanel(props: {
           const y = node.y * 5.2 - height / 2;
 
           return (
-            <g
+            <foreignObject
               key={node.id}
-              className={
-                node.id === props.graph.focusId
-                  ? `graph-node is-focus kind-${node.kind}`
-                  : `graph-node kind-${node.kind}`
-              }
-              transform={`translate(${x} ${y})`}
-              onClick={() => props.onSelectNode(node)}
+              x={x}
+              y={y}
+              width={width}
+              height={height}
             >
-              <rect rx="22" ry="22" width={width} height={height} />
-              <text className="graph-node-kind" x="18" y="22">
-                {node.kind}
-              </text>
-              <text className="graph-node-label" x="18" y="42">
-                {truncateGraphLabel(node.label)}
-              </text>
-              {node.path ? (
-                <text className="graph-node-path" x="18" y="58">
-                  {truncateGraphLabel(node.path, 28)}
-                </text>
-              ) : null}
-            </g>
+              <button
+                className={
+                  node.id === props.graph.focusId
+                    ? `graph-node-button is-focus kind-${node.kind}`
+                    : `graph-node-button kind-${node.kind}`
+                }
+                type="button"
+                onClick={() => props.onSelectNode(node)}
+              >
+                <span className="graph-node-kind">{node.kind}</span>
+                <span className="graph-node-label">
+                  {truncateGraphLabel(node.label)}
+                </span>
+                {node.path ? (
+                  <span className="graph-node-path">
+                    {truncateGraphLabel(node.path, 28)}
+                  </span>
+                ) : null}
+              </button>
+            </foreignObject>
           );
         })}
       </svg>
