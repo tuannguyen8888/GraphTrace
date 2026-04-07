@@ -101,6 +101,44 @@ describe("agent bootstrap", () => {
     expect(codexConfig?.content).toContain('args = ["mcp"]');
   });
 
+  test("renders the Codex skill as an operating guide with concrete query sequences", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "graphtrace-agent-"));
+    const plan = await planAgentBootstrap({ workspaceRoot });
+
+    const renderedFiles = renderAgentBootstrapFiles(plan);
+    const codexSkill = renderedFiles.find(
+      (file) =>
+        file.path ===
+        join(
+          workspaceRoot,
+          ".agents",
+          "skills",
+          "graphtrace",
+          "SKILL.md",
+        ),
+    );
+
+    expect(codexSkill?.content).toContain("Decision tree");
+    expect(codexSkill?.content).toContain("`get_status` -> `run_index`");
+    expect(codexSkill?.content).toContain("`get_routes` -> `search_code` -> `get_data_flow`");
+    expect(codexSkill?.content).toContain(
+      "`get_impact_analysis` -> `get_dependencies`",
+    );
+    expect(codexSkill?.content).toContain(
+      "`search_code` -> `get_symbol_context`",
+    );
+    expect(codexSkill?.content).toContain(
+      "`list_packages` -> `get_package_overview`",
+    );
+    expect(codexSkill?.content).toContain("Fallback when GraphTrace is sparse");
+    expect(codexSkill?.content).toContain(
+      "Summarize the relevant findings instead of pasting raw JSON",
+    );
+    expect(codexSkill?.content).toContain(
+      "Re-run `run_index` after significant workspace changes",
+    );
+  });
+
   test("renders Claude config and managed CLAUDE.md guidance", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "graphtrace-agent-"));
     const plan = await planAgentBootstrap({ workspaceRoot });
@@ -266,8 +304,11 @@ describe("agent bootstrap", () => {
     for (const file of instructionFiles) {
       expect(file.content).toContain("Prefer narrow queries first");
       expect(file.content).toContain("before filesystem-wide grep");
-      expect(file.content).toContain("get_status` before `run_index");
-      expect(file.content).toContain("Do not paste large raw outputs");
+      expect(file.content).toContain("get_status");
+      expect(file.content).toContain("run_index");
+      expect(file.content).toMatch(
+        /Do not paste large raw outputs|Summarize the relevant findings instead of pasting raw JSON/,
+      );
     }
   });
 });
