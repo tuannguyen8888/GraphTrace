@@ -6,8 +6,8 @@ import type {
   DependencyDirection,
   DiscoveredUnit,
   GraphItem,
-  IndexSummary,
   IndexRunInfo,
+  IndexSummary,
   QueryResult,
   RepositorySummary,
   RouteItem,
@@ -848,8 +848,8 @@ export class GraphStore {
 
   statsByRepository(repositoryId: string): IndexSummary {
     const repositories = this.repositories();
-    const packageCount = this.packageOverviewByRepository(repositoryId).items
-      .length;
+    const packageCount =
+      this.packageOverviewByRepository(repositoryId).items.length;
     const routeCount = this.routesByRepository(repositoryId).items.length;
     const fileRows = this.db
       .prepare("SELECT path FROM files ORDER BY path")
