@@ -9,12 +9,16 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 
 import { ensureWorkspaceInitialized } from "@graphtrace/config";
 import { indexWorkspace } from "@graphtrace/indexer";
 
 import { runCli } from "../src/index";
+
+const execFileAsync = promisify(execFile);
 
 function runCliProcess(
   cwd: string,
@@ -142,6 +146,120 @@ describe("cli", () => {
     await expect(
       access(join(workspaceRoot, ".cursor", "mcp.json")),
     ).rejects.toThrow();
+  });
+
+  test("agent setup --write-mode local keeps generated files out of git status", async () => {
+    const workspaceRoot = await mkdtemp(
+      join(tmpdir(), "graphtrace-cli-agent-local-"),
+    );
+
+    await writeFile(
+      join(workspaceRoot, "package.json"),
+      JSON.stringify({
+        name: "graphtrace-agent-local",
+        private: true,
+        type: "module",
+      }),
+      "utf8",
+    );
+    await writeFile(join(workspaceRoot, ".gitignore"), ".graphtrace\n", "utf8");
+    await execFileAsync("git", ["init"], { cwd: workspaceRoot });
+    await execFileAsync("git", ["config", "user.name", "GraphTrace Test"], {
+      cwd: workspaceRoot,
+    });
+    await execFileAsync(
+      "git",
+      ["config", "user.email", "graphtrace@example.com"],
+      {
+        cwd: workspaceRoot,
+      },
+    );
+    await execFileAsync("git", ["add", "package.json", ".gitignore"], {
+      cwd: workspaceRoot,
+    });
+    await execFileAsync("git", ["commit", "-m", "init"], { cwd: workspaceRoot });
+    await ensureWorkspaceInitialized(workspaceRoot);
+    await execFileAsync("git", ["status", "--short"], { cwd: workspaceRoot });
+
+    const result = await runCli(
+      ["agent", "setup", "--tool", "codex", "--write-mode", "local"],
+      {
+        cwd: workspaceRoot,
+      },
+    );
+    const status = await execFileAsync("git", ["status", "--short"], {
+      cwd: workspaceRoot,
+    });
+    const exclude = await readFile(
+      join(workspaceRoot, ".git", "info", "exclude"),
+      "utf8",
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(status.stdout.trim()).toBe("");
+    expect(exclude).toContain("/.codex/config.toml");
+    expect(exclude).toContain("/.agents/skills/graphtrace/SKILL.md");
+  });
+
+  test("agent restore removes git exclude entries created by local write mode", async () => {
+    const workspaceRoot = await mkdtemp(
+      join(tmpdir(), "graphtrace-cli-agent-local-restore-"),
+    );
+
+    await writeFile(
+      join(workspaceRoot, "package.json"),
+      JSON.stringify({
+        name: "graphtrace-agent-local-restore",
+        private: true,
+        type: "module",
+      }),
+      "utf8",
+    );
+    await writeFile(join(workspaceRoot, ".gitignore"), ".graphtrace\n", "utf8");
+    await execFileAsync("git", ["init"], { cwd: workspaceRoot });
+    await execFileAsync("git", ["config", "user.name", "GraphTrace Test"], {
+      cwd: workspaceRoot,
+    });
+    await execFileAsync(
+      "git",
+      ["config", "user.email", "graphtrace@example.com"],
+      {
+        cwd: workspaceRoot,
+      },
+    );
+    await execFileAsync("git", ["add", "package.json", ".gitignore"], {
+      cwd: workspaceRoot,
+    });
+    await execFileAsync("git", ["commit", "-m", "init"], { cwd: workspaceRoot });
+    await ensureWorkspaceInitialized(workspaceRoot);
+
+    await runCli(
+      ["agent", "setup", "--tool", "codex", "--write-mode", "local"],
+      {
+        cwd: workspaceRoot,
+      },
+    );
+
+    const setupExclude = await readFile(
+      join(workspaceRoot, ".git", "info", "exclude"),
+      "utf8",
+    );
+    const restoreResult = await runCli(
+      ["agent", "restore", "--tool", "codex"],
+      {
+        cwd: workspaceRoot,
+      },
+    );
+    const restoredExclude = await readFile(
+      join(workspaceRoot, ".git", "info", "exclude"),
+      "utf8",
+    );
+
+    expect(setupExclude).toContain("/.codex/config.toml");
+    expect(setupExclude).toContain("/.agents/skills/graphtrace/SKILL.md");
+    expect(restoreResult.exitCode).toBe(0);
+    expect(restoredExclude).not.toContain("/.codex/config.toml");
+    expect(restoredExclude).not.toContain("/.agents/skills/graphtrace/SKILL.md");
   });
 
   test("agent setup reports detected tools, changed files, and manual approval note", async () => {
