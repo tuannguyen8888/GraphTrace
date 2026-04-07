@@ -1,6 +1,13 @@
 import { startTransition, useDeferredValue, useEffect, useState } from "react";
 
 import {
+  buildArchitectureGraph,
+  layoutArchitectureGraph,
+  type ArchitectureGraphEdge,
+  type ArchitectureGraphNode,
+  type GraphEdgeFilters,
+} from "./architecture-graph";
+import {
   buildGraphTraceCommand,
   buildPackageEntries,
   buildRouteInsights,
@@ -59,6 +66,12 @@ export function App() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
   const [actionFeedback, setActionFeedback] = useState("");
+  const [edgeFilters, setEdgeFilters] = useState<GraphEdgeFilters>({
+    flow: true,
+    depends: true,
+    impacts: true,
+    contains: true,
+  });
   const [routeFlow, setRouteFlow] = useState<GraphItem[]>([]);
   const [dependencyItems, setDependencyItems] = useState<GraphItem[]>([]);
   const [impactItems, setImpactItems] = useState<GraphItem[]>([]);
@@ -85,6 +98,18 @@ export function App() {
     matchesScope(item.path, scopeMode),
   );
   const routeInsights = buildRouteInsights(visibleRouteFlow, packages);
+  const architectureGraph = buildArchitectureGraph({
+    inspector,
+    packages,
+    routes,
+    routeFlow: visibleRouteFlow,
+    dependencyItems: visibleDependencyItems,
+    impactItems: visibleImpactItems,
+    scopeMode,
+    selectedPackageId,
+    edgeFilters,
+  });
+  const positionedGraphNodes = layoutArchitectureGraph(architectureGraph);
   const selectedPath =
     inspector.type === "route"
       ? inspector.route.filePath
@@ -457,6 +482,67 @@ export function App() {
           </aside>
 
           <section className="workspace-main">
+            <article className="panel graph-panel">
+              <div className="panel-heading">
+                <span className="panel-kicker">Architecture graph</span>
+                <h2>Bounded relationship view</h2>
+                <p>
+                  Graph view chỉ hiển thị neighborhood quanh selection hiện tại
+                  để tránh noise trên self-host repo.
+                </p>
+              </div>
+
+              <div className="graph-toolbar">
+                {(
+                  [
+                    ["flow", "Flow"],
+                    ["depends", "Dependencies"],
+                    ["impacts", "Impact"],
+                    ["contains", "Contains"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <button
+                    key={key}
+                    className={
+                      edgeFilters[key]
+                        ? "graph-filter is-active"
+                        : "graph-filter"
+                    }
+                    type="button"
+                    onClick={() =>
+                      setEdgeFilters((current) => ({
+                        ...current,
+                        [key]: !current[key],
+                      }))
+                    }
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <ArchitectureGraphPanel
+                graph={architectureGraph}
+                nodes={positionedGraphNodes}
+                onSelectNode={(node) =>
+                  inspectGraphItem(
+                    {
+                      id: node.id,
+                      kind: node.kind,
+                      label: node.label,
+                      path: node.path,
+                    },
+                    packages,
+                    routes,
+                    setInspector,
+                    setSelectedPackageId,
+                    setSearchKind,
+                    setSearchText,
+                  )
+                }
+              />
+            </article>
+
             <article className="panel">
               <div className="panel-heading">
                 <span className="panel-kicker">Search results</span>
@@ -901,6 +987,100 @@ function InspectorSection(props: {
   );
 }
 
+function ArchitectureGraphPanel(props: {
+  graph: {
+    focusId: string;
+    nodes: ArchitectureGraphNode[];
+    edges: ArchitectureGraphEdge[];
+  };
+  nodes: Array<ArchitectureGraphNode & { x: number; y: number }>;
+  onSelectNode: (node: ArchitectureGraphNode) => void;
+}) {
+  if (props.graph.nodes.length === 0) {
+    return (
+      <div className="empty-state graph-empty">
+        Chọn route, file, hoặc package trong inspector để xem bounded
+        architecture graph quanh selection đó.
+      </div>
+    );
+  }
+
+  const nodeMap = new Map(props.nodes.map((node) => [node.id, node]));
+
+  return (
+    <div className="graph-canvas">
+      <svg
+        className="graph-svg"
+        viewBox="0 0 1000 520"
+        role="img"
+        aria-label="Architecture relationship graph"
+      >
+        <defs>
+          <linearGradient id="graphEdge" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="rgba(246, 180, 73, 0.2)" />
+            <stop offset="100%" stopColor="rgba(103, 160, 255, 0.45)" />
+          </linearGradient>
+        </defs>
+
+        {props.graph.edges.map((edge) => {
+          const source = nodeMap.get(edge.sourceId);
+          const target = nodeMap.get(edge.targetId);
+          if (!source || !target) {
+            return null;
+          }
+
+          const startX = source.x * 10;
+          const startY = source.y * 5.2;
+          const endX = target.x * 10;
+          const endY = target.y * 5.2;
+          const controlX = (startX + endX) / 2;
+
+          return (
+            <path
+              key={edge.id}
+              className={`graph-edge edge-${edge.kind}`}
+              d={`M ${startX} ${startY} C ${controlX} ${startY}, ${controlX} ${endY}, ${endX} ${endY}`}
+            />
+          );
+        })}
+
+        {props.nodes.map((node) => {
+          const width = node.id === props.graph.focusId ? 210 : 176;
+          const height = node.id === props.graph.focusId ? 70 : 60;
+          const x = node.x * 10 - width / 2;
+          const y = node.y * 5.2 - height / 2;
+
+          return (
+            <g
+              key={node.id}
+              className={
+                node.id === props.graph.focusId
+                  ? `graph-node is-focus kind-${node.kind}`
+                  : `graph-node kind-${node.kind}`
+              }
+              transform={`translate(${x} ${y})`}
+              onClick={() => props.onSelectNode(node)}
+            >
+              <rect rx="22" ry="22" width={width} height={height} />
+              <text className="graph-node-kind" x="18" y="22">
+                {node.kind}
+              </text>
+              <text className="graph-node-label" x="18" y="42">
+                {truncateGraphLabel(node.label)}
+              </text>
+              {node.path ? (
+                <text className="graph-node-path" x="18" y="58">
+                  {truncateGraphLabel(node.path, 28)}
+                </text>
+              ) : null}
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
 function inspectSearchResult(
   item: SearchResult,
   routes: RouteSummary[],
@@ -1063,4 +1243,12 @@ function joinPath(root: string, path: string) {
   }
 
   return `${root.replace(/\/$/, "")}/${path.replace(/^\.\//, "")}`;
+}
+
+function truncateGraphLabel(value: string, maxLength = 24) {
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.slice(0, maxLength - 1)}…`;
 }
