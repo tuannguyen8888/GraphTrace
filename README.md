@@ -5,15 +5,29 @@
 [![GitHub Release](https://img.shields.io/github/v/release/tuannguyen8888/GraphTrace)](https://github.com/tuannguyen8888/GraphTrace/releases)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 
-GraphTrace is a local-first code graph for JavaScript and TypeScript projects.
+GraphTrace is a local-first code graph for JavaScript and TypeScript projects that helps developers understand the blast radius of a change before they touch the code.
 
-It indexes code into a local SQLite graph store, then exposes the same query layer through:
+In large repos, the hard part is rarely just writing the patch. The hard part is answering the questions that decide whether the patch is safe:
+
+- Which files, packages, routes, and handlers are actually connected to this change?
+- What breaks if I edit this service, symbol, or query path?
+- How do I give an AI agent precise repository context without making it grep half the repo and burn tokens?
+
+GraphTrace indexes your code into a local SQLite-backed graph, then exposes that understanding through:
 
 - a CLI for engineers
 - an MCP server for coding agents
 - a local web UI for inspection
 
-The goal is simple: make a codebase easier to understand, safer to change, and easier to query without shipping source code to a remote service by default.
+The goal is simple: make code changes safer, repo navigation faster, and AI-assisted development more reliable without shipping source code to a remote service by default.
+
+## Why Developers Reach For GraphTrace
+
+Use GraphTrace when you need to move quickly in a codebase but still want to know what you are changing.
+
+- Change safety first: run impact analysis, dependency tracing, route discovery, and flow inspection before editing a file that could affect multiple packages or services.
+- Faster understanding in large repos: build a local graph once, then search symbols, routes, files, packages, and unit boundaries without guessing where the architecture lives.
+- Better AI context: expose the same graph through MCP so Codex, Claude Code, and Cursor can ask focused questions about the repo instead of doing broad filesystem scans.
 
 ## What You Can Use Today
 
@@ -29,6 +43,8 @@ Current capabilities include:
 - route discovery for Express, Fastify, Nest, and Next App Router
 - query hints for Prisma and Drizzle patterns
 - MCP tools for search, deps, impact, flow, status, routes, packages, and reindex
+- project-local agent bootstrap for Codex, Claude Code, and Cursor
+- agent setup lifecycle commands for setup, status, JSON status, restore, and tool-scoped restore
 - local HTTP API plus an inspection-focused web UI
 - published npm CLI package plus GitHub release notes for tagged versions
 
@@ -112,16 +128,82 @@ Start the MCP server:
 graphtrace mcp
 ```
 
+Bootstrap project-local AI agent config:
+
+```bash
+graphtrace agent setup
+graphtrace agent setup --dry-run
+graphtrace agent setup --tool codex
+graphtrace agent status
+graphtrace agent status --json
+graphtrace agent restore
+graphtrace agent restore --tool codex
+```
+
+Typical workflow before a risky change:
+
+```bash
+graphtrace index --full
+graphtrace impact apps/api/src/services/user-service.ts --depth 4
+graphtrace deps apps/api/src/routes/users.ts --direction out --depth 2
+graphtrace flow "GET /users"
+```
+
+## AI Agent Setup
+
+GraphTrace can generate project-local MCP and instruction files for:
+
+- Codex
+- Claude Code
+- Cursor
+
+Run:
+
+```bash
+graphtrace agent setup
+```
+
+This command writes only repository-local files. It does not mutate global user config outside the repo.
+
+Generated files:
+
+- Codex: `.codex/config.toml`, `.agents/skills/graphtrace/SKILL.md`
+- Claude Code: `.mcp.json`, `.claude/CLAUDE.md`
+- Cursor: `.cursor/mcp.json`, `.cursor/rules/graphtrace.mdc`
+
+Useful options:
+
+- `graphtrace agent setup --dry-run` previews planned changes without writing files
+- `graphtrace agent setup --tool codex` limits setup to one supported tool
+
+Lifecycle helpers:
+
+- `graphtrace agent status` checks whether the project-local GraphTrace files are currently configured for each supported tool
+- `graphtrace agent status --json` returns the same state in structured form for automation
+- `graphtrace agent restore` rolls back the most recent `agent setup` run using the state file and backups stored under `.graphtrace`
+- `graphtrace agent restore --tool codex` rolls back only one supported tool and keeps the remaining setup state intact
+
+Why this helps:
+
+- gives agents a shared local MCP entry for `graphtrace mcp`
+- teaches agents when to use GraphTrace tools like `search_code`, `get_dependencies`, `get_impact_analysis`, and `get_status`
+- encourages narrow semantic queries before broad repository scans, which reduces wasted context and token usage
+
+Manual step:
+
+- after files are generated, approve the GraphTrace MCP in Codex, Claude Code, or Cursor if that tool prompts for trust or MCP approval
+
 ## Why Teams Use It
 
-GraphTrace is designed to help with:
+GraphTrace is designed to help both individual developers and teams answer the questions that usually slow code changes down:
 
-- impact analysis before changing a file or service
-- dependency tracing across packages and modules
-- route discovery and route-to-code flow inspection
-- local code search across symbols, files, packages, and routes
-- providing structured context to AI agents through MCP
-- powering internal tooling from one graph/query backend instead of separate ad hoc scripts
+- impact analysis before changing a file, service, or package boundary
+- dependency tracing across packages and modules when a refactor might spread further than expected
+- route discovery and route-to-code flow inspection when debugging request handling
+- local code search across symbols, files, packages, routes, and discovered units
+- structured repository context for AI agents through MCP instead of ad hoc prompt stuffing
+- project-local agent setup so teams can standardize AI tooling per repository
+- internal tooling powered from one graph/query backend instead of separate ad hoc scripts
 
 ## Architecture
 

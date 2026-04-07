@@ -23,6 +23,15 @@ import type {
   IndexWorkspaceResult,
 } from "@graphtrace/shared";
 
+import { type SupportedAgentTool, planAgentBootstrap } from "./agent/bootstrap";
+import {
+  applyRenderedAgentFiles,
+  loadAgentSetupState,
+  restoreAgentSetupState,
+} from "./agent/files";
+import { inspectAgentBootstrapStatus } from "./agent/status";
+import { renderAgentBootstrapFiles } from "./agent/templates";
+
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx"]);
 const IGNORED_NAMES = new Set([
   "node_modules",
@@ -86,6 +95,85 @@ export async function runCli(
         ].join("\n"),
         stderr: "",
       };
+    }
+    case "agent": {
+      const [subcommand, ...agentArgs] = args;
+      const selectedTool = readAgentToolOption(agentArgs, "--tool");
+
+      switch (subcommand) {
+        case "setup": {
+          const plan = await planAgentBootstrap({
+            workspaceRoot: cwd,
+            tools: selectedTool ? [selectedTool] : undefined,
+          });
+          const renderedFiles = renderAgentBootstrapFiles(plan);
+          const dryRun = agentArgs.includes("--dry-run");
+
+          const applyResult = dryRun
+            ? {
+                backups: [],
+                state: { entries: [], updatedAt: "", version: 1 as const },
+                writtenFiles: [],
+              }
+            : await applyRenderedAgentFiles(renderedFiles, {
+                workspaceRoot: cwd,
+              });
+
+          return {
+            exitCode: 0,
+            stdout: formatAgentSetupResult(
+              plan,
+              dryRun
+                ? renderedFiles.map((file) => file.path)
+                : applyResult.writtenFiles,
+              dryRun,
+              applyResult.backups.map((backup) => backup.backupPath),
+            ),
+            stderr: "",
+          };
+        }
+        case "status": {
+          const plan = await planAgentBootstrap({
+            workspaceRoot: cwd,
+            tools: selectedTool ? [selectedTool] : undefined,
+          });
+          const statuses = await inspectAgentBootstrapStatus(plan);
+          return {
+            exitCode: 0,
+            stdout: agentArgs.includes("--json")
+              ? JSON.stringify({ tools: statuses }, null, 2)
+              : formatAgentStatusResult(statuses),
+            stderr: "",
+          };
+        }
+        case "restore": {
+          const state = await loadAgentSetupState(cwd);
+          if (!state) {
+            return {
+              exitCode: 1,
+              stdout: "",
+              stderr: "no agent setup state found to restore",
+            };
+          }
+
+          const restoredFiles = await restoreAgentSetupState(
+            cwd,
+            state,
+            selectedTool,
+          );
+          return {
+            exitCode: 0,
+            stdout: formatAgentRestoreResult(restoredFiles),
+            stderr: "",
+          };
+        }
+        default:
+          return {
+            exitCode: 1,
+            stdout: "",
+            stderr: `unknown agent command: ${subcommand ?? "<none>"}`,
+          };
+      }
     }
     case "index": {
       const asJson = args.includes("--json");
@@ -442,4 +530,54 @@ function readDirectionOption(
   }
 
   return undefined;
+}
+
+function readAgentToolOption(
+  argv: string[],
+  name: string,
+): SupportedAgentTool | undefined {
+  const raw = readOption(argv, name);
+  if (raw === "codex" || raw === "claude" || raw === "cursor") {
+    return raw;
+  }
+
+  return undefined;
+}
+
+function formatAgentSetupResult(
+  plan: Awaited<ReturnType<typeof planAgentBootstrap>>,
+  changedFiles: string[],
+  dryRun: boolean,
+  backups: string[],
+): string {
+  const header = dryRun ? "agent setup preview" : "agent setup complete";
+  return [
+    header,
+    ...plan.tools.map(
+      (tool) =>
+        `tool:${tool.id}:${tool.detection.status}:${tool.targets.length}`,
+    ),
+    ...changedFiles.map((file) => `file:${file}`),
+    ...backups.map((file) => `backup:${file}`),
+    "manual: approve GraphTrace MCP in the target tool UI if prompted.",
+  ].join("\n");
+}
+
+function formatAgentStatusResult(
+  statuses: Awaited<ReturnType<typeof inspectAgentBootstrapStatus>>,
+): string {
+  return [
+    "agent status",
+    ...statuses.map(
+      (tool) =>
+        `tool:${tool.id}:${tool.status}:${tool.configuredTargets}/${tool.expectedTargets}`,
+    ),
+  ].join("\n");
+}
+
+function formatAgentRestoreResult(restoredFiles: string[]): string {
+  return [
+    "agent restore complete",
+    ...restoredFiles.map((file) => `file:${file}`),
+  ].join("\n");
 }

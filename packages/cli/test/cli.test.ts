@@ -1,4 +1,11 @@
-import { mkdtemp, stat } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -33,6 +40,211 @@ describe("cli", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("node:");
     expect(result.stdout).toContain("pnpm:");
+  });
+
+  test("agent setup creates project-local files for codex, claude, and cursor", async () => {
+    const workspaceRoot = await mkdtemp(
+      join(tmpdir(), "graphtrace-cli-agent-"),
+    );
+
+    const result = await runCli(["agent", "setup"], { cwd: workspaceRoot });
+
+    expect(result.exitCode).toBe(0);
+    await expect(
+      access(join(workspaceRoot, ".codex", "config.toml")),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(
+        join(workspaceRoot, ".agents", "skills", "graphtrace", "SKILL.md"),
+      ),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(join(workspaceRoot, ".mcp.json")),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(join(workspaceRoot, ".claude", "CLAUDE.md")),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(join(workspaceRoot, ".cursor", "mcp.json")),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(join(workspaceRoot, ".cursor", "rules", "graphtrace.mdc")),
+    ).resolves.toBeUndefined();
+  });
+
+  test("agent setup --dry-run previews changes without writing files", async () => {
+    const workspaceRoot = await mkdtemp(
+      join(tmpdir(), "graphtrace-cli-agent-"),
+    );
+
+    const result = await runCli(["agent", "setup", "--dry-run"], {
+      cwd: workspaceRoot,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("agent setup preview");
+    await expect(
+      access(join(workspaceRoot, ".codex", "config.toml")),
+    ).rejects.toThrow();
+  });
+
+  test("agent setup --tool codex only writes Codex targets", async () => {
+    const workspaceRoot = await mkdtemp(
+      join(tmpdir(), "graphtrace-cli-agent-"),
+    );
+
+    const result = await runCli(["agent", "setup", "--tool", "codex"], {
+      cwd: workspaceRoot,
+    });
+
+    expect(result.exitCode).toBe(0);
+    await expect(
+      access(join(workspaceRoot, ".codex", "config.toml")),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(
+        join(workspaceRoot, ".agents", "skills", "graphtrace", "SKILL.md"),
+      ),
+    ).resolves.toBeUndefined();
+    await expect(access(join(workspaceRoot, ".mcp.json"))).rejects.toThrow();
+    await expect(
+      access(join(workspaceRoot, ".cursor", "mcp.json")),
+    ).rejects.toThrow();
+  });
+
+  test("agent setup reports detected tools, changed files, and manual approval note", async () => {
+    const workspaceRoot = await mkdtemp(
+      join(tmpdir(), "graphtrace-cli-agent-"),
+    );
+
+    const result = await runCli(["agent", "setup"], { cwd: workspaceRoot });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("tool:codex");
+    expect(result.stdout).toContain("tool:claude");
+    expect(result.stdout).toContain("tool:cursor");
+    expect(result.stdout).toContain("file:");
+    expect(result.stdout).toContain("approve GraphTrace MCP");
+  });
+
+  test("agent status reports configured tools after setup", async () => {
+    const workspaceRoot = await mkdtemp(
+      join(tmpdir(), "graphtrace-cli-agent-status-"),
+    );
+
+    await runCli(["agent", "setup"], { cwd: workspaceRoot });
+    const result = await runCli(["agent", "status"], { cwd: workspaceRoot });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("agent status");
+    expect(result.stdout).toContain("tool:codex:configured");
+    expect(result.stdout).toContain("tool:claude:configured");
+    expect(result.stdout).toContain("tool:cursor:configured");
+  });
+
+  test("agent status --json returns structured tool status", async () => {
+    const workspaceRoot = await mkdtemp(
+      join(tmpdir(), "graphtrace-cli-agent-status-json-"),
+    );
+
+    await runCli(["agent", "setup"], { cwd: workspaceRoot });
+    const result = await runCli(["agent", "status", "--json"], {
+      cwd: workspaceRoot,
+    });
+
+    const payload = JSON.parse(result.stdout) as {
+      tools: Array<{
+        id: string;
+        status: string;
+        configuredTargets: number;
+        expectedTargets: number;
+      }>;
+    };
+
+    expect(result.exitCode).toBe(0);
+    expect(payload.tools).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "codex",
+          status: "configured",
+          configuredTargets: 2,
+          expectedTargets: 2,
+        }),
+        expect.objectContaining({
+          id: "claude",
+          status: "configured",
+          configuredTargets: 2,
+          expectedTargets: 2,
+        }),
+        expect.objectContaining({
+          id: "cursor",
+          status: "configured",
+          configuredTargets: 2,
+          expectedTargets: 2,
+        }),
+      ]),
+    );
+  });
+
+  test("agent restore removes created files and restores overwritten content", async () => {
+    const workspaceRoot = await mkdtemp(
+      join(tmpdir(), "graphtrace-cli-agent-restore-"),
+    );
+    const claudePath = join(workspaceRoot, ".claude", "CLAUDE.md");
+
+    await ensureWorkspaceInitialized(workspaceRoot);
+    await mkdir(join(workspaceRoot, ".claude"), { recursive: true });
+    await writeFile(claudePath, "# existing claude memory\n", "utf8");
+
+    await runCli(["agent", "setup"], { cwd: workspaceRoot });
+    const restoreResult = await runCli(["agent", "restore"], {
+      cwd: workspaceRoot,
+    });
+
+    expect(restoreResult.exitCode).toBe(0);
+    expect(await readFile(claudePath, "utf8")).toBe(
+      "# existing claude memory\n",
+    );
+    await expect(
+      access(join(workspaceRoot, ".codex", "config.toml")),
+    ).rejects.toThrow();
+    await expect(access(join(workspaceRoot, ".mcp.json"))).rejects.toThrow();
+    await expect(
+      access(join(workspaceRoot, ".cursor", "mcp.json")),
+    ).rejects.toThrow();
+  });
+
+  test("agent restore --tool codex only rolls back Codex files", async () => {
+    const workspaceRoot = await mkdtemp(
+      join(tmpdir(), "graphtrace-cli-agent-restore-tool-"),
+    );
+
+    await runCli(["agent", "setup"], { cwd: workspaceRoot });
+    const restoreResult = await runCli(
+      ["agent", "restore", "--tool", "codex"],
+      {
+        cwd: workspaceRoot,
+      },
+    );
+
+    expect(restoreResult.exitCode).toBe(0);
+    await expect(
+      access(join(workspaceRoot, ".codex", "config.toml")),
+    ).rejects.toThrow();
+    await expect(
+      access(
+        join(workspaceRoot, ".agents", "skills", "graphtrace", "SKILL.md"),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      access(join(workspaceRoot, ".mcp.json")),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(join(workspaceRoot, ".claude", "CLAUDE.md")),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(join(workspaceRoot, ".cursor", "mcp.json")),
+    ).resolves.toBeUndefined();
   });
 
   test("doctor --units reports discovered units for non-standard layouts", async () => {
