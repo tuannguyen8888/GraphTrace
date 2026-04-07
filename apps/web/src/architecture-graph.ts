@@ -1,12 +1,12 @@
 import {
-  filterRoutesForDisplay,
-  findOwningPackage,
-  matchesScope,
   type GraphItem,
   type PackageSummary,
   type RouteSummary,
   type ScopeMode,
   type SearchResult,
+  filterRoutesForDisplay,
+  findOwningPackage,
+  matchesScope,
 } from "./view-model";
 
 export interface GraphEdgeFilters {
@@ -179,10 +179,14 @@ export function buildArchitectureGraph(
       cluster: "focus",
     });
 
-    const visibleRoutes = filterRoutesForDisplay(options.routes, options.packages, {
-      scopeMode: options.scopeMode,
-      selectedPackageId: selectedPackage.id,
-    }).slice(0, 8);
+    const visibleRoutes = filterRoutesForDisplay(
+      options.routes,
+      options.packages,
+      {
+        scopeMode: options.scopeMode,
+        selectedPackageId: selectedPackage.id,
+      },
+    ).slice(0, 8);
 
     for (const route of visibleRoutes) {
       addNode({
@@ -319,7 +323,11 @@ export function layoutArchitectureGraph(
     const spread = Math.max(clusterNodes.length - 1, 1);
     const offset = clusterNodes.length === 1 ? 0 : index - spread / 2;
     const horizontalSpread =
-      node.cluster === "focus" ? 0 : node.cluster === "dependencies" || node.cluster === "impacts" ? 12 : 16;
+      node.cluster === "focus"
+        ? 0
+        : node.cluster === "dependencies" || node.cluster === "impacts"
+          ? 12
+          : 16;
     const verticalSpread =
       node.cluster === "files" || node.cluster === "queries" ? 10 : 8;
 

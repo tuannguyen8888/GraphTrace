@@ -119,7 +119,9 @@ export function buildPackageEntries(
   }
 
   return [...filteredPackages]
-    .sort((left, right) => compareByScopeAndLabel(left.path, right.path, left.label, right.label))
+    .sort((left, right) =>
+      compareByScopeAndLabel(left.path, right.path, left.label, right.label),
+    )
     .map((entry) => ({
       ...entry,
       disambiguation: (labelCounts.get(entry.label) ?? 0) > 1,
@@ -199,13 +201,17 @@ export function findOwningPackage(
     return null;
   }
 
-  return [...packages]
-    .filter(
-      (entry) =>
-        entry.path &&
-        (path === entry.path || path.startsWith(`${entry.path}/`)),
-    )
-    .sort((left, right) => (right.path?.length ?? 0) - (left.path?.length ?? 0))[0] ?? null;
+  return (
+    [...packages]
+      .filter(
+        (entry) =>
+          entry.path &&
+          (path === entry.path || path.startsWith(`${entry.path}/`)),
+      )
+      .sort(
+        (left, right) => (right.path?.length ?? 0) - (left.path?.length ?? 0),
+      )[0] ?? null
+  );
 }
 
 export function buildGraphTraceCommand(

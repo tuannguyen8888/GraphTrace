@@ -93,7 +93,9 @@ describe("web ui view-model", () => {
 
   test("builds package entries with disambiguation for duplicate labels", () => {
     const entries = buildPackageEntries(packages, "all");
-    const duplicateEntries = entries.filter((entry) => entry.label === "@fixture/api");
+    const duplicateEntries = entries.filter(
+      (entry) => entry.label === "@fixture/api",
+    );
 
     expect(duplicateEntries).toHaveLength(2);
     expect(duplicateEntries.every((entry) => entry.disambiguation)).toBe(true);
@@ -120,8 +122,12 @@ describe("web ui view-model", () => {
   });
 
   test("filters search results by scope", () => {
-    expect(filterSearchResultsForDisplay(searchResults, "primary")).toHaveLength(1);
-    expect(filterSearchResultsForDisplay(searchResults, "tests")).toHaveLength(1);
+    expect(
+      filterSearchResultsForDisplay(searchResults, "primary"),
+    ).toHaveLength(1);
+    expect(filterSearchResultsForDisplay(searchResults, "tests")).toHaveLength(
+      1,
+    );
     expect(filterSearchResultsForDisplay(searchResults, "all")).toHaveLength(2);
   });
 

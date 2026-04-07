@@ -109,18 +109,14 @@ describe("agent bootstrap", () => {
     const codexSkill = renderedFiles.find(
       (file) =>
         file.path ===
-        join(
-          workspaceRoot,
-          ".agents",
-          "skills",
-          "graphtrace",
-          "SKILL.md",
-        ),
+        join(workspaceRoot, ".agents", "skills", "graphtrace", "SKILL.md"),
     );
 
     expect(codexSkill?.content).toContain("Decision tree");
     expect(codexSkill?.content).toContain("`get_status` -> `run_index`");
-    expect(codexSkill?.content).toContain("`get_routes` -> `search_code` -> `get_data_flow`");
+    expect(codexSkill?.content).toContain(
+      "`get_routes` -> `search_code` -> `get_data_flow`",
+    );
     expect(codexSkill?.content).toContain(
       "`get_impact_analysis` -> `get_dependencies`",
     );

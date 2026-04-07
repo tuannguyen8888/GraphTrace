@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import {
   access,
   mkdir,
@@ -8,8 +10,6 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawn } from "node:child_process";
-import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 
@@ -27,7 +27,12 @@ function runCliProcess(
   return new Promise((resolve) => {
     const child = spawn(
       "pnpm",
-      ["exec", "tsx", join(process.cwd(), "packages", "cli", "src", "bin.ts"), ...args],
+      [
+        "exec",
+        "tsx",
+        join(process.cwd(), "packages", "cli", "src", "bin.ts"),
+        ...args,
+      ],
       {
         cwd,
         stdio: ["ignore", "pipe", "pipe"],
@@ -177,7 +182,9 @@ describe("cli", () => {
     await execFileAsync("git", ["add", "package.json", ".gitignore"], {
       cwd: workspaceRoot,
     });
-    await execFileAsync("git", ["commit", "-m", "init"], { cwd: workspaceRoot });
+    await execFileAsync("git", ["commit", "-m", "init"], {
+      cwd: workspaceRoot,
+    });
     await ensureWorkspaceInitialized(workspaceRoot);
     await execFileAsync("git", ["status", "--short"], { cwd: workspaceRoot });
 
@@ -230,7 +237,9 @@ describe("cli", () => {
     await execFileAsync("git", ["add", "package.json", ".gitignore"], {
       cwd: workspaceRoot,
     });
-    await execFileAsync("git", ["commit", "-m", "init"], { cwd: workspaceRoot });
+    await execFileAsync("git", ["commit", "-m", "init"], {
+      cwd: workspaceRoot,
+    });
     await ensureWorkspaceInitialized(workspaceRoot);
 
     await runCli(
@@ -259,7 +268,9 @@ describe("cli", () => {
     expect(setupExclude).toContain("/.agents/skills/graphtrace/SKILL.md");
     expect(restoreResult.exitCode).toBe(0);
     expect(restoredExclude).not.toContain("/.codex/config.toml");
-    expect(restoredExclude).not.toContain("/.agents/skills/graphtrace/SKILL.md");
+    expect(restoredExclude).not.toContain(
+      "/.agents/skills/graphtrace/SKILL.md",
+    );
   });
 
   test("agent setup reports detected tools, changed files, and manual approval note", async () => {
@@ -624,9 +635,7 @@ describe("cli", () => {
     ]);
 
     expect(results).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ code: 0 }),
-      ]),
+      expect.arrayContaining([expect.objectContaining({ code: 0 })]),
     );
     expect(results.every((result) => result.code === 0)).toBe(true);
     expect(

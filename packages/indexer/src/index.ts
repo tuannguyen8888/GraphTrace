@@ -323,7 +323,11 @@ function resolveImport(
     return resolveRelativeImport(workspaceRoot, absolutePath, moduleSpecifier);
   }
 
-  return resolveWorkspacePackageImport(workspaceRoot, moduleSpecifier, packages);
+  return resolveWorkspacePackageImport(
+    workspaceRoot,
+    moduleSpecifier,
+    packages,
+  );
 }
 
 function resolveRelativeImport(
@@ -382,9 +386,7 @@ function resolveImportCandidate(
   workspaceRoot: string,
   base: string,
 ): string | null {
-  const sourceDir = posix.dirname(
-    base,
-  );
+  const sourceDir = posix.dirname(base);
   const name = posix.basename(base);
   const parentDir = sourceDir === "." ? "" : `${sourceDir}/`;
   const baseWithoutExtension = `${parentDir}${name}`.replace(
