@@ -391,60 +391,99 @@ a {
   overflow: auto;
 }
 
-.graph-svg {
-  width: 100%;
-  min-width: 960px;
-  height: 520px;
-  display: block;
+.graph-workspace {
+  display: grid;
+  gap: 14px;
 }
 
-.graph-edge {
-  fill: none;
-  stroke-width: 2.4;
-  opacity: 0.85;
+.graph-workspace.is-fullscreen {
+  min-height: 100vh;
+  padding: 20px;
+  background: linear-gradient(180deg, rgba(4, 10, 19, 0.98), #02070f);
 }
 
-.edge-flow {
-  stroke: rgba(99, 187, 255, 0.78);
+.graph-workspace-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: end;
 }
 
-.edge-depends {
-  stroke: rgba(246, 180, 73, 0.75);
+.graph-toolbar-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
-.edge-impacts {
-  stroke: rgba(255, 129, 102, 0.78);
+.graph-search-results {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 
-.edge-contains {
-  stroke: rgba(151, 205, 142, 0.72);
-  stroke-dasharray: 7 6;
+.graph-search-hit,
+.graph-search-empty {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.025);
+  color: inherit;
+  text-align: left;
 }
 
-.graph-node-button {
+.graph-search-hit.is-active,
+.graph-search-hit:hover {
+  border-color: rgba(99, 187, 255, 0.3);
+  background: linear-gradient(135deg, rgba(99, 187, 255, 0.12), transparent),
+    rgba(255, 255, 255, 0.045);
+}
+
+.graph-react-flow {
+  min-height: 560px;
+  height: 560px;
+  overflow: hidden;
+}
+
+.graph-workspace.is-fullscreen .graph-react-flow {
+  height: calc(100vh - 180px);
+}
+
+.graph-react-flow .react-flow__node {
+  background: transparent;
+  border: none;
+}
+
+.graph-react-flow .react-flow__renderer,
+.graph-react-flow .react-flow__pane {
+  cursor: grab;
+}
+
+.graph-react-flow .react-flow__controls,
+.graph-react-flow .react-flow__minimap {
+  background: rgba(6, 15, 27, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.graph-react-flow .react-flow__controls-button {
+  background: rgba(6, 15, 27, 0.92);
+  color: #edf2f7;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.graph-react-flow .react-flow__attribution {
+  display: none;
+}
+
+.graph-node-card {
   width: 100%;
   height: 100%;
   display: grid;
   align-content: start;
   gap: 4px;
   padding: 14px 18px;
-  border-radius: 22px;
-  border: 1.4px solid rgba(255, 255, 255, 0.09);
-  background: rgba(9, 19, 34, 0.95);
-  color: inherit;
-  text-align: left;
-  transition: border-color 140ms ease, transform 140ms ease, background 140ms
-    ease;
-}
-
-.graph-node-button:hover,
-.graph-node-button:focus-visible,
-.graph-node-button.is-focus {
-  border-color: rgba(246, 180, 73, 0.42);
-}
-
-.graph-node-button.is-focus {
-  background: rgba(18, 31, 52, 0.96);
 }
 
 .graph-node-kind,
@@ -455,20 +494,26 @@ a {
 }
 
 .graph-node-kind {
-  fill: #f6b449;
+  color: #f6b449;
   font-size: 11px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
 .graph-node-label {
-  fill: #f7fbff;
+  color: #f7fbff;
   font-size: 14px;
 }
 
 .graph-node-path {
-  fill: #9fb0c8;
+  color: #9fb0c8;
   font-size: 11px;
+}
+
+.graph-handle {
+  width: 10px;
+  height: 10px;
+  opacity: 0;
 }
 
 .stack-list {
@@ -720,13 +765,16 @@ a {
   .workspace-grid,
   .control-row,
   .quick-pick-grid,
+  .graph-search-results,
   .metric-grid {
     grid-template-columns: 1fr;
   }
 
   .action-row,
   .inspector-row-actions,
-  .route-meta-line {
+  .route-meta-line,
+  .graph-workspace-toolbar,
+  .graph-toolbar-actions {
     flex-direction: column;
     align-items: stretch;
   }

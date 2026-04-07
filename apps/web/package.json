@@ -8,10 +8,13 @@
   },
   "dependencies": {
     "@graphtrace/shared": "workspace:*",
+    "@xyflow/react": "^12.10.2",
+    "dagre": "^0.8.5",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
+    "@types/dagre": "^0.7.54",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "@vitejs/plugin-react": "^5.0.4",

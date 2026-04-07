@@ -4,12 +4,11 @@ import type { RepositorySummary } from "@graphtrace/shared";
 import { pathBelongsToRepository } from "@graphtrace/shared";
 
 import {
-  type ArchitectureGraphEdge,
-  type ArchitectureGraphNode,
   type GraphEdgeFilters,
   buildArchitectureGraph,
   layoutArchitectureGraph,
 } from "./architecture-graph";
+import { GraphWorkspace } from "./graph-workspace";
 import {
   type GraphItem,
   type PackageListEntry,
@@ -633,7 +632,7 @@ export function App() {
                 ))}
               </div>
 
-              <ArchitectureGraphPanel
+              <GraphWorkspace
                 graph={architectureGraph}
                 nodes={positionedGraphNodes}
                 onSelectNode={(node) =>
@@ -1149,104 +1148,6 @@ function InspectorSection(props: {
   );
 }
 
-function ArchitectureGraphPanel(props: {
-  graph: {
-    focusId: string;
-    nodes: ArchitectureGraphNode[];
-    edges: ArchitectureGraphEdge[];
-  };
-  nodes: Array<ArchitectureGraphNode & { x: number; y: number }>;
-  onSelectNode: (node: ArchitectureGraphNode) => void;
-}) {
-  if (props.graph.nodes.length === 0) {
-    return (
-      <div className="empty-state graph-empty">
-        Chọn route, file, hoặc package trong inspector để xem bounded
-        architecture graph quanh selection đó.
-      </div>
-    );
-  }
-
-  const nodeMap = new Map(props.nodes.map((node) => [node.id, node]));
-
-  return (
-    <div className="graph-canvas">
-      <svg
-        className="graph-svg"
-        viewBox="0 0 1000 520"
-        role="img"
-        aria-label="Architecture relationship graph"
-      >
-        <defs>
-          <linearGradient id="graphEdge" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="rgba(246, 180, 73, 0.2)" />
-            <stop offset="100%" stopColor="rgba(103, 160, 255, 0.45)" />
-          </linearGradient>
-        </defs>
-
-        {props.graph.edges.map((edge) => {
-          const source = nodeMap.get(edge.sourceId);
-          const target = nodeMap.get(edge.targetId);
-          if (!source || !target) {
-            return null;
-          }
-
-          const startX = source.x * 10;
-          const startY = source.y * 5.2;
-          const endX = target.x * 10;
-          const endY = target.y * 5.2;
-          const controlX = (startX + endX) / 2;
-
-          return (
-            <path
-              key={edge.id}
-              className={`graph-edge edge-${edge.kind}`}
-              d={`M ${startX} ${startY} C ${controlX} ${startY}, ${controlX} ${endY}, ${endX} ${endY}`}
-            />
-          );
-        })}
-
-        {props.nodes.map((node) => {
-          const width = node.id === props.graph.focusId ? 210 : 176;
-          const height = node.id === props.graph.focusId ? 70 : 60;
-          const x = node.x * 10 - width / 2;
-          const y = node.y * 5.2 - height / 2;
-
-          return (
-            <foreignObject
-              key={node.id}
-              x={x}
-              y={y}
-              width={width}
-              height={height}
-            >
-              <button
-                className={
-                  node.id === props.graph.focusId
-                    ? `graph-node-button is-focus kind-${node.kind}`
-                    : `graph-node-button kind-${node.kind}`
-                }
-                type="button"
-                onClick={() => props.onSelectNode(node)}
-              >
-                <span className="graph-node-kind">{node.kind}</span>
-                <span className="graph-node-label">
-                  {truncateGraphLabel(node.label)}
-                </span>
-                {node.path ? (
-                  <span className="graph-node-path">
-                    {truncateGraphLabel(node.path, 28)}
-                  </span>
-                ) : null}
-              </button>
-            </foreignObject>
-          );
-        })}
-      </svg>
-    </div>
-  );
-}
-
 function inspectSearchResult(
   item: SearchResult,
   routes: RouteSummary[],
@@ -1493,12 +1394,4 @@ function joinPath(root: string, path: string) {
   }
 
   return `${root.replace(/\/$/, "")}/${path.replace(/^\.\//, "")}`;
-}
-
-function truncateGraphLabel(value: string, maxLength = 24) {
-  if (value.length <= maxLength) {
-    return value;
-  }
-
-  return `${value.slice(0, maxLength - 1)}…`;
 }

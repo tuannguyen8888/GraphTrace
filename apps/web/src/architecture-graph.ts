@@ -1,3 +1,5 @@
+import dagre from "dagre";
+
 import {
   type GraphItem,
   type PackageSummary,
@@ -47,6 +49,10 @@ export interface ArchitectureGraphModel {
   edges: ArchitectureGraphEdge[];
   focusId: string;
   nodes: ArchitectureGraphNode[];
+}
+
+export interface ArchitectureGraphSearchMatch extends ArchitectureGraphNode {
+  score: number;
 }
 
 export interface BuildArchitectureGraphOptions {
@@ -297,47 +303,131 @@ export function buildArchitectureGraph(
 export function layoutArchitectureGraph(
   graph: ArchitectureGraphModel,
 ): PositionedArchitectureGraphNode[] {
-  const buckets = new Map<
-    ArchitectureGraphNode["cluster"],
-    ArchitectureGraphNode[]
-  >();
-
-  for (const node of graph.nodes) {
-    buckets.set(node.cluster, [...(buckets.get(node.cluster) ?? []), node]);
+  if (graph.nodes.length === 0) {
+    return [];
   }
 
-  const anchors: Record<ArchitectureGraphNode["cluster"], [number, number]> = {
-    focus: [50, 50],
-    packages: [20, 24],
-    dependencies: [18, 54],
-    impacts: [82, 54],
-    routes: [50, 20],
-    files: [50, 54],
-    queries: [50, 84],
-  };
+  const layoutGraph = new dagre.graphlib.Graph();
+  layoutGraph.setGraph({
+    rankdir: "LR",
+    nodesep: 54,
+    ranksep: 112,
+    marginx: 32,
+    marginy: 32,
+  });
+  layoutGraph.setDefaultEdgeLabel(() => ({}));
+
+  for (const node of graph.nodes) {
+    const size = graphNodeSize(node, graph.focusId);
+    layoutGraph.setNode(node.id, size);
+  }
+
+  for (const edge of graph.edges) {
+    layoutGraph.setEdge(edge.sourceId, edge.targetId, {
+      weight: edge.kind === "flow" ? 3 : 1,
+      minlen: edge.kind === "contains" ? 1 : 2,
+    });
+  }
+
+  dagre.layout(layoutGraph);
 
   return graph.nodes.map((node) => {
-    const clusterNodes = buckets.get(node.cluster) ?? [];
-    const index = clusterNodes.findIndex((entry) => entry.id === node.id);
-    const [anchorX, anchorY] = anchors[node.cluster];
-    const spread = Math.max(clusterNodes.length - 1, 1);
-    const offset = clusterNodes.length === 1 ? 0 : index - spread / 2;
-    const horizontalSpread =
-      node.cluster === "focus"
-        ? 0
-        : node.cluster === "dependencies" || node.cluster === "impacts"
-          ? 12
-          : 16;
-    const verticalSpread =
-      node.cluster === "files" || node.cluster === "queries" ? 10 : 8;
+    const positionedNode = layoutGraph.node(node.id);
+    const size = graphNodeSize(node, graph.focusId);
 
     return {
       ...node,
-      x: anchorX + offset * horizontalSpread,
-      y:
-        node.cluster === "dependencies" || node.cluster === "impacts"
-          ? anchorY + offset * verticalSpread
-          : anchorY,
+      x: positionedNode?.x ?? size.width / 2,
+      y: positionedNode?.y ?? size.height / 2,
     };
   });
+}
+
+export function searchArchitectureGraphNodes(
+  graph: ArchitectureGraphModel,
+  query: string,
+): ArchitectureGraphSearchMatch[] {
+  const normalizedQuery = query.trim().toLowerCase();
+
+  if (!normalizedQuery) {
+    return [];
+  }
+
+  return graph.nodes
+    .map((node) => ({
+      ...node,
+      score: scoreGraphNode(node, normalizedQuery, graph.focusId),
+    }))
+    .filter((node) => node.score > 0)
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+
+      if (left.id === graph.focusId || right.id === graph.focusId) {
+        return left.id === graph.focusId ? -1 : 1;
+      }
+
+      return left.label.localeCompare(right.label);
+    });
+}
+
+function graphNodeSize(
+  node: ArchitectureGraphNode,
+  focusId: string,
+) {
+  if (node.id === focusId) {
+    return { width: 280, height: 112 };
+  }
+
+  if (node.kind === "package") {
+    return { width: 248, height: 96 };
+  }
+
+  if (node.kind === "query") {
+    return { width: 256, height: 94 };
+  }
+
+  return { width: 232, height: 88 };
+}
+
+function scoreGraphNode(
+  node: ArchitectureGraphNode,
+  normalizedQuery: string,
+  focusId: string,
+) {
+  const haystacks = [
+    node.label.toLowerCase(),
+    node.path?.toLowerCase() ?? "",
+    node.kind.toLowerCase(),
+    node.id.toLowerCase(),
+  ];
+
+  let score = 0;
+
+  for (const haystack of haystacks) {
+    if (!haystack) {
+      continue;
+    }
+
+    if (haystack === normalizedQuery) {
+      score += 14;
+      continue;
+    }
+
+    if (haystack.startsWith(normalizedQuery)) {
+      score += 9;
+      continue;
+    }
+
+    if (haystack.includes(normalizedQuery)) {
+      score += 6;
+    }
+  }
+
+  if (node.id === focusId && score > 0) {
+    score += 4;
+  }
+
+  return score;
 }

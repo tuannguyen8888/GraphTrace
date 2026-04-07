@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   type GraphEdgeFilters,
   buildArchitectureGraph,
+  searchArchitectureGraphNodes,
 } from "../../../apps/web/src/architecture-graph";
 import type {
   GraphItem,
@@ -248,5 +249,42 @@ describe("architecture graph", () => {
     );
     expect(graph.edges.every((edge) => edge.kind !== "depends")).toBe(true);
     expect(graph.edges.every((edge) => edge.kind !== "impacts")).toBe(true);
+  });
+
+  test("supports graph-local search with focus-aware ranking", () => {
+    const selectedRoute = routes[0];
+    if (!selectedRoute) {
+      throw new Error("Expected a route fixture for graph tests.");
+    }
+
+    const graph = buildArchitectureGraph({
+      inspector: {
+        type: "route",
+        route: selectedRoute,
+      },
+      packages,
+      routes,
+      routeFlow,
+      dependencyItems,
+      impactItems,
+      scopeMode: "primary",
+      selectedPackageId: "",
+      edgeFilters: allEdges,
+    });
+
+    expect(searchArchitectureGraphNodes(graph, "impact")[0]?.id).toBe(
+      "GET /api/impact",
+    );
+    expect(searchArchitectureGraphNodes(graph, "query-engine")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "package:packages/query-engine",
+        }),
+        expect.objectContaining({
+          id: "file:packages/query-engine/src/index.ts",
+        }),
+      ]),
+    );
+    expect(searchArchitectureGraphNodes(graph, "missing-node")).toEqual([]);
   });
 });
