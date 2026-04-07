@@ -101,6 +101,7 @@ export async function indexWorkspace(
       sourceFile,
       options.workspaceRoot,
       absolutePath,
+      inspection.packages,
     );
 
     for (const imported of localImports) {
@@ -264,6 +265,7 @@ function extractImports(
   sourceFile: ts.SourceFile,
   workspaceRoot: string,
   absolutePath: string,
+  packages: WorkspacePackageInfo[],
 ) {
   const imported: Array<{ localName: string; resolvedPath: string | null }> =
     [];
@@ -288,20 +290,22 @@ function extractImports(
       for (const element of statement.importClause.namedBindings.elements) {
         imported.push({
           localName: element.name.text,
-          resolvedPath: resolveLocalImport(
+          resolvedPath: resolveImport(
             workspaceRoot,
             absolutePath,
             moduleSpecifier,
+            packages,
           ),
         });
       }
     }
     imported.push({
       localName,
-      resolvedPath: resolveLocalImport(
+      resolvedPath: resolveImport(
         workspaceRoot,
         absolutePath,
         moduleSpecifier,
+        packages,
       ),
     });
   }
@@ -309,27 +313,93 @@ function extractImports(
   return imported.filter((entry) => entry.localName || entry.resolvedPath);
 }
 
-function resolveLocalImport(
+function resolveImport(
+  workspaceRoot: string,
+  absolutePath: string,
+  moduleSpecifier: string,
+  packages: WorkspacePackageInfo[],
+): string | null {
+  if (moduleSpecifier.startsWith(".")) {
+    return resolveRelativeImport(workspaceRoot, absolutePath, moduleSpecifier);
+  }
+
+  return resolveWorkspacePackageImport(workspaceRoot, moduleSpecifier, packages);
+}
+
+function resolveRelativeImport(
   workspaceRoot: string,
   absolutePath: string,
   moduleSpecifier: string,
 ): string | null {
-  if (!moduleSpecifier.startsWith(".")) {
-    return null;
-  }
-
   const sourceDir = posix.dirname(
     toPosixPath(relativePath(workspaceRoot, absolutePath)),
   );
   const base = posix.normalize(posix.join(sourceDir, moduleSpecifier));
-  const baseWithoutExtension = base.replace(/\.(js|jsx|ts|tsx)$/, "");
+  return resolveImportCandidate(workspaceRoot, base);
+}
+
+function resolveWorkspacePackageImport(
+  workspaceRoot: string,
+  moduleSpecifier: string,
+  packages: WorkspacePackageInfo[],
+): string | null {
+  const matchingPackage = packages
+    .filter(
+      (entry) =>
+        moduleSpecifier === entry.name ||
+        moduleSpecifier.startsWith(`${entry.name}/`),
+    )
+    .sort((left, right) => right.name.length - left.name.length)[0];
+
+  if (!matchingPackage) {
+    return null;
+  }
+
+  const subpath = moduleSpecifier
+    .slice(matchingPackage.name.length)
+    .replace(/^\/+/, "");
+  const bases = subpath
+    ? [
+        posix.join(matchingPackage.rootPath, "src", subpath),
+        posix.join(matchingPackage.rootPath, subpath),
+      ]
+    : [
+        posix.join(matchingPackage.rootPath, "src", "index"),
+        posix.join(matchingPackage.rootPath, "index"),
+      ];
+
+  for (const base of bases) {
+    const resolvedPath = resolveImportCandidate(workspaceRoot, base);
+    if (resolvedPath) {
+      return resolvedPath;
+    }
+  }
+
+  return null;
+}
+
+function resolveImportCandidate(
+  workspaceRoot: string,
+  base: string,
+): string | null {
+  const sourceDir = posix.dirname(
+    base,
+  );
+  const name = posix.basename(base);
+  const parentDir = sourceDir === "." ? "" : `${sourceDir}/`;
+  const baseWithoutExtension = `${parentDir}${name}`.replace(
+    /\.(js|jsx|ts|tsx)$/,
+    "",
+  );
   const candidates = [
     `${baseWithoutExtension}.ts`,
     `${baseWithoutExtension}.tsx`,
     `${baseWithoutExtension}.js`,
     `${baseWithoutExtension}.jsx`,
-    `${base}/index.ts`,
-    `${base}/index.tsx`,
+    `${baseWithoutExtension}/index.ts`,
+    `${baseWithoutExtension}/index.tsx`,
+    `${baseWithoutExtension}/index.js`,
+    `${baseWithoutExtension}/index.jsx`,
   ];
   for (const candidate of candidates) {
     const filePath = join(workspaceRoot, candidate);

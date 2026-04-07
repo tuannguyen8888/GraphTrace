@@ -14,6 +14,7 @@ const nestFixtureRoot = join(
   "nest-drizzle-workspace",
 );
 const fastifyFixtureRoot = join(process.cwd(), "fixtures", "fastify-workspace");
+const selfHostRoot = process.cwd();
 
 describe("query engine", () => {
   test("search, routes, deps, impact, and flow work on the express fixture", async () => {
@@ -104,6 +105,32 @@ describe("query engine", () => {
       nextStore.close();
       nestStore.close();
       fastifyStore.close();
+    }
+  });
+
+  test("resolves workspace package imports on the self-host repo", async () => {
+    await ensureWorkspaceInitialized(selfHostRoot);
+    await indexWorkspace({ workspaceRoot: selfHostRoot, full: true });
+
+    const store = openGraphStore(join(selfHostRoot, ".graphtrace", "index.db"));
+
+    try {
+      const deps = createQueryEngine(store).dependencies(
+        "packages/server/src/index.ts",
+        "out",
+        2,
+      );
+
+      expect(
+        deps.items.some((item) =>
+          item.path?.includes("packages/query-engine/src/index.ts"),
+        ),
+      ).toBe(true);
+      expect(
+        deps.items.some((item) => item.path?.includes("packages/storage/src")),
+      ).toBe(true);
+    } finally {
+      store.close();
     }
   });
 });
