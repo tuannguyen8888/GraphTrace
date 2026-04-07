@@ -1,5 +1,11 @@
 # graphtrace
 
+## 1.3.0
+
+### Minor Changes
+
+- Improve the self-host experience with repository-scoped browsing, repo-first triage, a guided search workbench, and an interactive architecture graph workspace.
+
 ## 1.2.0
 
 ### Minor Changes
