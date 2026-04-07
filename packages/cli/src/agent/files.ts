@@ -1,5 +1,5 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, join, relative } from "node:path";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, join, relative, resolve } from "node:path";
 
 import type { RenderedAgentFile } from "./templates";
 
@@ -9,7 +9,10 @@ const AGENT_SETUP_STATE_PATH = join(".graphtrace", "agent", "setup-state.json");
 
 export interface ApplyRenderedAgentFilesOptions {
   workspaceRoot?: string;
+  writeMode?: AgentSetupWriteMode;
 }
+
+export type AgentSetupWriteMode = "tracked" | "local";
 
 export interface RenderedAgentFileBackup {
   originalPath: string;
@@ -31,8 +34,9 @@ export interface AgentSetupStateEntry {
 
 export interface AgentSetupState {
   entries: AgentSetupStateEntry[];
+  ignoreEntries?: string[];
   updatedAt: string;
-  version: 1;
+  version: 2;
 }
 
 export async function applyRenderedAgentFiles(
@@ -102,10 +106,16 @@ export async function applyRenderedAgentFiles(
     writtenFiles.push(file.path);
   }
 
+  const ignoreEntries =
+    options.writeMode === "local" && options.workspaceRoot
+      ? await ensureGitInfoExcludeEntries(options.workspaceRoot, writtenFiles)
+      : [];
+
   const state: AgentSetupState = {
     entries: stateEntries,
+    ignoreEntries,
     updatedAt: new Date().toISOString(),
-    version: 1,
+    version: 2,
   };
 
   if (options.workspaceRoot) {
@@ -140,6 +150,17 @@ export async function restoreAgentSetupState(
 ): Promise<string[]> {
   const restoredPaths: string[] = [];
   const remainingEntries: AgentSetupStateEntry[] = [];
+  const toolIgnoreEntries = toolId
+    ? new Set(
+        state.entries
+          .filter((entry) => entry.toolId === toolId)
+          .map((entry) => toGitIgnoreEntry(workspaceRoot, entry.path)),
+      )
+    : new Set<string>();
+  const remainingIgnoreEntries =
+    toolId && state.ignoreEntries?.length
+      ? state.ignoreEntries.filter((entry) => !toolIgnoreEntries.has(entry))
+      : [];
 
   for (const entry of [...state.entries].reverse()) {
     if (toolId && entry.toolId !== toolId) {
@@ -161,11 +182,21 @@ export async function restoreAgentSetupState(
     }
   }
 
+  const ignoreEntriesToRemove =
+    toolId && state.ignoreEntries?.length
+      ? state.ignoreEntries.filter((entry) => toolIgnoreEntries.has(entry))
+      : (state.ignoreEntries ?? []);
+
+  if (ignoreEntriesToRemove.length > 0) {
+    await removeGitInfoExcludeEntries(workspaceRoot, ignoreEntriesToRemove);
+  }
+
   if (remainingEntries.length > 0) {
     await writeAgentSetupState(workspaceRoot, {
       entries: remainingEntries,
+      ignoreEntries: remainingIgnoreEntries,
       updatedAt: new Date().toISOString(),
-      version: 1,
+      version: 2,
     });
   } else {
     await rm(getAgentSetupStatePath(workspaceRoot), { force: true });
@@ -247,8 +278,96 @@ async function writeAgentSetupState(
   );
 }
 
+async function ensureGitInfoExcludeEntries(
+  workspaceRoot: string,
+  writtenFiles: string[],
+): Promise<string[]> {
+  const excludePath = await resolveGitInfoExcludePath(workspaceRoot);
+  if (!excludePath || writtenFiles.length === 0) {
+    return [];
+  }
+
+  await mkdir(dirname(excludePath), { recursive: true });
+  const existing = await readOptionalFile(excludePath);
+  const existingEntries = new Set(
+    existing
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean),
+  );
+  const entries = writtenFiles.map((filePath) =>
+    toGitIgnoreEntry(workspaceRoot, filePath),
+  );
+  const nextEntries = [...existingEntries];
+  let changed = false;
+
+  for (const entry of entries) {
+    if (existingEntries.has(entry)) {
+      continue;
+    }
+    nextEntries.push(entry);
+    changed = true;
+  }
+
+  if (changed) {
+    await writeFile(`${excludePath}`, `${nextEntries.join("\n")}\n`, "utf8");
+  }
+
+  return entries;
+}
+
+async function removeGitInfoExcludeEntries(
+  workspaceRoot: string,
+  ignoreEntries: string[],
+): Promise<void> {
+  const excludePath = await resolveGitInfoExcludePath(workspaceRoot);
+  if (!excludePath || ignoreEntries.length === 0) {
+    return;
+  }
+
+  const existing = await readOptionalFile(excludePath);
+  if (!existing) {
+    return;
+  }
+
+  const entriesToRemove = new Set(ignoreEntries);
+  const filtered = existing
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => line && !entriesToRemove.has(line));
+
+  await writeFile(`${excludePath}`, `${filtered.join("\n")}\n`, "utf8");
+}
+
+async function resolveGitInfoExcludePath(
+  workspaceRoot: string,
+): Promise<string | null> {
+  const gitPath = join(workspaceRoot, ".git");
+
+  try {
+    const gitStat = await stat(gitPath);
+    if (gitStat.isDirectory()) {
+      return join(gitPath, "info", "exclude");
+    }
+  } catch {
+    return null;
+  }
+
+  const pointer = await readOptionalFile(gitPath);
+  const match = pointer.match(/^gitdir:\s*(.+)\s*$/im);
+  if (!match?.[1]) {
+    return null;
+  }
+
+  return join(resolve(workspaceRoot, match[1]), "info", "exclude");
+}
+
 function getAgentSetupStatePath(workspaceRoot: string): string {
   return join(workspaceRoot, AGENT_SETUP_STATE_PATH);
+}
+
+function toGitIgnoreEntry(workspaceRoot: string, targetPath: string): string {
+  return `/${relative(workspaceRoot, targetPath).replaceAll("\\", "/")}`;
 }
 
 function escapeRegExp(value: string): string {

@@ -25,6 +25,7 @@ import type {
 
 import { type SupportedAgentTool, planAgentBootstrap } from "./agent/bootstrap";
 import {
+  type AgentSetupWriteMode,
   applyRenderedAgentFiles,
   loadAgentSetupState,
   restoreAgentSetupState,
@@ -99,6 +100,7 @@ export async function runCli(
     case "agent": {
       const [subcommand, ...agentArgs] = args;
       const selectedTool = readAgentToolOption(agentArgs, "--tool");
+      const writeMode = readAgentWriteModeOption(agentArgs, "--write-mode");
 
       switch (subcommand) {
         case "setup": {
@@ -117,6 +119,7 @@ export async function runCli(
               }
             : await applyRenderedAgentFiles(renderedFiles, {
                 workspaceRoot: cwd,
+                writeMode,
               });
 
           return {
@@ -538,6 +541,18 @@ function readAgentToolOption(
 ): SupportedAgentTool | undefined {
   const raw = readOption(argv, name);
   if (raw === "codex" || raw === "claude" || raw === "cursor") {
+    return raw;
+  }
+
+  return undefined;
+}
+
+function readAgentWriteModeOption(
+  argv: string[],
+  name: string,
+): AgentSetupWriteMode | undefined {
+  const raw = readOption(argv, name);
+  if (raw === "tracked" || raw === "local") {
     return raw;
   }
 
