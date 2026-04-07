@@ -280,6 +280,79 @@ a {
   margin-bottom: 18px;
 }
 
+.search-guidance {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.search-guidance-card,
+.search-kind-guide {
+  display: grid;
+  gap: 6px;
+  padding: 16px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.search-guidance-card h3 {
+  margin: 0;
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+  letter-spacing: -0.03em;
+}
+
+.search-guidance-card p,
+.search-kind-guide span {
+  margin: 0;
+  color: #9fb0c8;
+}
+
+.search-kind-guide strong {
+  width: fit-content;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(87, 146, 255, 0.14);
+  color: #dce8ff;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.72rem;
+}
+
+.quick-pick-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.quick-pick {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(180deg, rgba(87, 146, 255, 0.08), transparent),
+    rgba(255, 255, 255, 0.02);
+  color: inherit;
+  text-align: left;
+  transition: transform 140ms ease, border-color 140ms ease, background 140ms
+    ease;
+}
+
+.quick-pick:hover {
+  transform: translateY(-1px);
+  border-color: rgba(87, 146, 255, 0.28);
+  background: linear-gradient(180deg, rgba(87, 146, 255, 0.12), transparent),
+    rgba(255, 255, 255, 0.045);
+}
+
+.triage-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 8px;
+  color: #cbd8ea;
+}
+
 .graph-panel {
   overflow: hidden;
 }
@@ -646,6 +719,7 @@ a {
 
   .workspace-grid,
   .control-row,
+  .quick-pick-grid,
   .metric-grid {
     grid-template-columns: 1fr;
   }

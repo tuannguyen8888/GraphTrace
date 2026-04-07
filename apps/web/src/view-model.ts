@@ -79,6 +79,32 @@ export interface RouteInsights {
   relatedPackages: PackageListEntry[];
 }
 
+export interface SearchQuickPick {
+  id: string;
+  kind: string;
+  label: string;
+  query: string;
+  reason: string;
+}
+
+export interface SearchWorkbenchGuidance {
+  emptyStateTitle: string;
+  emptyStateBody: string;
+  kindGuide: string;
+  triageSteps: string[];
+  quickPicks: SearchQuickPick[];
+}
+
+export interface SearchWorkbenchGuidanceOptions {
+  packages: PackageSummary[];
+  routes: RouteSummary[];
+  repositories?: RepositorySummary[];
+  selectedRepositoryId?: string;
+  scopeMode: ScopeMode;
+  selectedPackageId: string;
+  searchKind: string;
+}
+
 export function classifyItemScope(path?: string): ItemScope {
   if (!path || path === ".") {
     return "primary";
@@ -237,6 +263,99 @@ export function buildRouteInsights(
   };
 }
 
+export function buildSearchWorkbenchGuidance(
+  options: SearchWorkbenchGuidanceOptions,
+): SearchWorkbenchGuidance {
+  const repositories = options.repositories ?? [];
+  const selectedRepositoryId = options.selectedRepositoryId ?? ".";
+  const visiblePackages = buildPackageEntries(
+    options.packages,
+    options.scopeMode,
+    repositories,
+    selectedRepositoryId,
+  );
+  const visibleRoutes = filterRoutesForDisplay(options.routes, options.packages, {
+    repositories,
+    selectedRepositoryId,
+    scopeMode: options.scopeMode,
+    selectedPackageId: options.selectedPackageId,
+  });
+  const selectedPackage =
+    options.packages.find((entry) => entry.id === options.selectedPackageId) ??
+    null;
+  const anchorRoute = visibleRoutes[0] ?? null;
+  const anchorPackage =
+    selectedPackage ??
+    (anchorRoute
+      ? findOwningPackage(anchorRoute.filePath, options.packages)
+      : visiblePackages.find((entry) => entry.path && entry.path !== ".") ??
+        visiblePackages[0] ??
+        null);
+  const anchorFilePath =
+    anchorRoute?.filePath ??
+    (selectedPackage?.path && selectedPackage.path !== "."
+      ? selectedPackage.path
+      : anchorPackage?.path && anchorPackage.path !== "."
+        ? anchorPackage.path
+        : undefined);
+  const quickPicks: SearchQuickPick[] = [];
+
+  if (anchorRoute) {
+    quickPicks.push({
+      id: `quick-route:${anchorRoute.id}`,
+      kind: "route",
+      label: `Bắt đầu từ route ${anchorRoute.id}`,
+      query: anchorRoute.id,
+      reason: "Hợp khi chưa biết symbol name nhưng biết luồng HTTP cần trace.",
+    });
+  }
+
+  if (anchorPackage) {
+    quickPicks.push({
+      id: `quick-package:${anchorPackage.id}`,
+      kind: "package",
+      label: `Khoanh vùng package ${anchorPackage.label}`,
+      query: anchorPackage.label,
+      reason: "Dùng package search để bó hẹp triage trước khi mở file cụ thể.",
+    });
+  }
+
+  if (anchorFilePath) {
+    quickPicks.push({
+      id: `quick-file:${anchorFilePath}`,
+      kind: "file",
+      label: `Mở file ${anchorFilePath}`,
+      query: anchorFilePath,
+      reason: "File search phù hợp khi cần mở đúng entrypoint hoặc handler path.",
+    });
+  }
+
+  const dedupedQuickPicks = quickPicks.filter(
+    (item, index, items) =>
+      items.findIndex(
+        (candidate) =>
+          candidate.kind === item.kind && candidate.query === item.query,
+      ) === index,
+  );
+  const contextLabel =
+    selectedPackage?.label ??
+    anchorPackage?.label ??
+    (selectedRepositoryId === "." ? "repo chính" : selectedRepositoryId);
+
+  return {
+    emptyStateTitle: `Bắt đầu triage từ ${contextLabel}`,
+    emptyStateBody:
+      "Chọn một quick pick bên dưới để bắt đầu từ route, package, hoặc file thay vì đoán symbol ngẫu nhiên.",
+    kindGuide: describeSearchKind(options.searchKind),
+    triageSteps: [
+      `1. Đi từ route để thấy flow và query hints trong ${contextLabel}.`,
+      "2. Khoanh vùng package liên quan để cắt bớt noise.",
+      "3. Mở file hoặc dependency trace khi đã có entrypoint đủ rõ.",
+    ],
+    quickPicks: dedupedQuickPicks.slice(0, 3),
+  };
+}
+
 export function findOwningPackage(
   path: string | undefined,
   packages: PackageSummary[],
@@ -307,5 +426,18 @@ function scopeWeight(scope: ItemScope) {
       return 1;
     case "fixture":
       return 2;
+  }
+}
+
+function describeSearchKind(kind: string) {
+  switch (kind) {
+    case "route":
+      return "Route search hợp với HTTP ids như GET /api/impact hoặc path fragments của endpoint.";
+    case "file":
+      return "File search hợp với path fragments như packages/server/src/index.ts hoặc watch.test.ts.";
+    case "package":
+      return "Package search hợp với package name hoặc root path khi cần khoanh vùng một khu vực code.";
+    default:
+      return "Symbol search hợp khi đã biết function, class, export, hoặc token code cụ thể.";
   }
 }

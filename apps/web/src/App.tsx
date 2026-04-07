@@ -19,6 +19,7 @@ import {
   type ScopeMode,
   type SearchResult,
   type WorkspaceStatus,
+  buildSearchWorkbenchGuidance,
   buildGraphTraceCommand,
   buildPackageEntries,
   buildRouteInsights,
@@ -64,10 +65,18 @@ export function App() {
   const [selectedRepositoryId, setSelectedRepositoryId] = useState(() =>
     readRepositoryFromLocation(),
   );
-  const [scopeMode, setScopeMode] = useState<ScopeMode>("primary");
-  const [selectedPackageId, setSelectedPackageId] = useState("");
-  const [searchText, setSearchText] = useState("");
-  const [searchKind, setSearchKind] = useState("symbol");
+  const [scopeMode, setScopeMode] = useState<ScopeMode>(() =>
+    readScopeFromLocation(),
+  );
+  const [selectedPackageId, setSelectedPackageId] = useState(() =>
+    readPackageFromLocation(),
+  );
+  const [searchText, setSearchText] = useState(() =>
+    readSearchTextFromLocation(),
+  );
+  const [searchKind, setSearchKind] = useState(() =>
+    readSearchKindFromLocation(),
+  );
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [inspector, setInspector] = useState<InspectorMode>({ type: "idle" });
   const [detailLoading, setDetailLoading] = useState(false);
@@ -121,6 +130,15 @@ export function App() {
     pathBelongsToRepository(item.path, selectedRepositoryId, repositories),
   );
   const routeInsights = buildRouteInsights(visibleRouteFlow, packages);
+  const searchWorkbench = buildSearchWorkbenchGuidance({
+    packages,
+    routes,
+    repositories,
+    selectedRepositoryId,
+    scopeMode,
+    selectedPackageId,
+    searchKind,
+  });
   const architectureGraph = buildArchitectureGraph({
     inspector,
     packages,
@@ -372,8 +390,14 @@ export function App() {
   }, [actionFeedback]);
 
   useEffect(() => {
-    syncRepositoryToLocation(selectedRepositoryId);
-  }, [selectedRepositoryId]);
+    syncUiStateToLocation({
+      repositoryId: selectedRepositoryId,
+      scopeMode,
+      selectedPackageId,
+      searchKind,
+      searchText,
+    });
+  }, [scopeMode, searchKind, searchText, selectedPackageId, selectedRepositoryId]);
 
   const relatedPackageItems = routeInsights.relatedPackages.map((entry) => ({
     id: entry.id,
@@ -664,11 +688,51 @@ export function App() {
                 </label>
               </div>
 
+              <section className="search-guidance">
+                <div className="search-guidance-card">
+                  <span className="panel-kicker">Guided triage</span>
+                  <h3>{searchWorkbench.emptyStateTitle}</h3>
+                  <p>{searchWorkbench.emptyStateBody}</p>
+                </div>
+
+                <div className="search-kind-guide">
+                  <strong>{searchKind}</strong>
+                  <span>{searchWorkbench.kindGuide}</span>
+                </div>
+
+                <div className="quick-pick-grid">
+                  {searchWorkbench.quickPicks.map((pick) => (
+                    <button
+                      key={pick.id}
+                      className="quick-pick"
+                      type="button"
+                      onClick={() => {
+                        startTransition(() => {
+                          setSearchKind(pick.kind);
+                          setSearchText(pick.query);
+                        });
+                      }}
+                    >
+                      <span className="list-chip">{pick.kind}</span>
+                      <span className="list-title">{pick.query}</span>
+                      <span className="list-subtle">{pick.reason}</span>
+                    </button>
+                  ))}
+                </div>
+
+                <ol className="triage-steps">
+                  {searchWorkbench.triageSteps.map((step) => (
+                    <li key={step}>{step}</li>
+                  ))}
+                </ol>
+              </section>
+
               <ul className="stack-list results-list">
                 {visibleSearchResults.length === 0 ? (
                   <li className="empty-state">
-                    Gõ query để xem symbol, route, file, hoặc package match theo
-                    scope hiện tại.
+                    {searchText.trim()
+                      ? `Chưa thấy ${searchKind} nào khớp với "${searchText}" trong scope hiện tại. Thử một quick pick phía trên hoặc đổi kind search.`
+                      : "Chọn một quick pick phía trên hoặc gõ query để xem symbol, route, file, hoặc package match theo scope hiện tại."}
                   </li>
                 ) : (
                   visibleSearchResults.map((item) => {
@@ -1310,6 +1374,42 @@ function readRepositoryFromLocation() {
   return new URL(window.location.href).searchParams.get("repository") ?? ".";
 }
 
+function readScopeFromLocation(): ScopeMode {
+  if (typeof window === "undefined") {
+    return "primary";
+  }
+
+  const scope = new URL(window.location.href).searchParams.get("scope");
+  return scope === "all" || scope === "tests" ? scope : "primary";
+}
+
+function readPackageFromLocation() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  return new URL(window.location.href).searchParams.get("package") ?? "";
+}
+
+function readSearchTextFromLocation() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  return new URL(window.location.href).searchParams.get("q") ?? "";
+}
+
+function readSearchKindFromLocation() {
+  if (typeof window === "undefined") {
+    return "symbol";
+  }
+
+  const kind = new URL(window.location.href).searchParams.get("kind");
+  return kind === "route" || kind === "file" || kind === "package"
+    ? kind
+    : "symbol";
+}
+
 function buildRepositoryQuery(repositoryId: string, hasExistingQuery = false) {
   if (!repositoryId) {
     return "";
@@ -1318,13 +1418,35 @@ function buildRepositoryQuery(repositoryId: string, hasExistingQuery = false) {
   return `${hasExistingQuery ? "&" : "?"}repository=${encodeURIComponent(repositoryId)}`;
 }
 
-function syncRepositoryToLocation(repositoryId: string) {
-  if (typeof window === "undefined" || !repositoryId) {
+function syncUiStateToLocation(state: {
+  repositoryId: string;
+  scopeMode: ScopeMode;
+  selectedPackageId: string;
+  searchKind: string;
+  searchText: string;
+}) {
+  if (typeof window === "undefined" || !state.repositoryId) {
     return;
   }
 
   const url = new URL(window.location.href);
-  url.searchParams.set("repository", repositoryId);
+  url.searchParams.set("repository", state.repositoryId);
+  url.searchParams.set("scope", state.scopeMode);
+
+  if (state.selectedPackageId) {
+    url.searchParams.set("package", state.selectedPackageId);
+  } else {
+    url.searchParams.delete("package");
+  }
+
+  if (state.searchText.trim()) {
+    url.searchParams.set("q", state.searchText);
+    url.searchParams.set("kind", state.searchKind);
+  } else {
+    url.searchParams.delete("q");
+    url.searchParams.delete("kind");
+  }
+
   window.history.replaceState({}, "", url);
 }
 

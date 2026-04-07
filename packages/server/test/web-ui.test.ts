@@ -13,6 +13,7 @@ import type {
   SearchResult,
 } from "../../../apps/web/src/view-model";
 import {
+  buildSearchWorkbenchGuidance,
   buildGraphTraceCommand,
   buildPackageEntries,
   buildRouteInsights,
@@ -259,6 +260,67 @@ describe("web ui view-model", () => {
         "fixtures/express-prisma-workspace",
       ),
     ).toHaveLength(1);
+  });
+
+  test("builds guided search quick picks for first-run repo triage", () => {
+    const repositories = deriveRepositories(units);
+    const guidance = buildSearchWorkbenchGuidance({
+      packages,
+      routes,
+      repositories,
+      selectedRepositoryId: ".",
+      scopeMode: "primary",
+      selectedPackageId: "",
+      searchKind: "symbol",
+    });
+
+    expect(guidance.quickPicks).toHaveLength(3);
+    expect(guidance.quickPicks.map((item) => item.kind)).toEqual([
+      "route",
+      "package",
+      "file",
+    ]);
+    expect(guidance.quickPicks.map((item) => item.query)).toEqual([
+      "GET /api/impact",
+      "@graphtrace/server",
+      "packages/server/src/index.ts",
+    ]);
+    expect(guidance.triageSteps[0]).toContain("route");
+  });
+
+  test("adapts guided search quick picks when scope and package change", () => {
+    const repositories = deriveRepositories(units);
+    const packageScoped = buildSearchWorkbenchGuidance({
+      packages,
+      routes,
+      repositories,
+      selectedRepositoryId: ".",
+      scopeMode: "all",
+      selectedPackageId: "package:packages/server",
+      searchKind: "route",
+    });
+    const testsScoped = buildSearchWorkbenchGuidance({
+      packages,
+      routes,
+      repositories,
+      selectedRepositoryId: ".",
+      scopeMode: "tests",
+      selectedPackageId: "",
+      searchKind: "route",
+    });
+
+    expect(packageScoped.quickPicks.map((item) => item.query)).toEqual([
+      "GET /api/impact",
+      "@graphtrace/server",
+      "packages/server/src/index.ts",
+    ]);
+    expect(testsScoped.quickPicks.map((item) => item.query)).toEqual([
+      "GET /admins",
+      "graphtrace",
+      "packages/cli/test/watch.test.ts",
+    ]);
+    expect(packageScoped.kindGuide).toContain("HTTP");
+    expect(testsScoped.emptyStateTitle).toContain("Bắt đầu");
   });
 
   test("derives route insights for related packages and query hints", () => {
