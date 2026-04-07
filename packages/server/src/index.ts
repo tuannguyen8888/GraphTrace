@@ -75,24 +75,52 @@ export function createGraphTraceApp(
   ) => withWorkspaceQueryEngine(options.workspaceRoot, action);
 
   app.get("/health", async () => ({ ok: true }));
-  app.get("/api/status", async () => {
+  app.get("/api/repositories", async () => {
+    return withQueryEngine((engine) => engine.repositories());
+  });
+  app.get("/api/status", async (request) => {
+    const { repository } = request.query as { repository?: string };
     return withQueryEngine((engine, dbPath) =>
-      engine.status(options.workspaceRoot, dbPath),
+      repository
+        ? engine.statusByRepository(options.workspaceRoot, dbPath, repository)
+        : engine.status(options.workspaceRoot, dbPath),
     );
   });
   app.get("/api/search", async (request) => {
-    const { q, kind } = request.query as { q?: string; kind?: string };
+    const { q, kind, repository } = request.query as {
+      q?: string;
+      kind?: string;
+      repository?: string;
+    };
     const query = String(q ?? "");
-    return withQueryEngine((engine) => engine.search(query, kind || undefined));
+    return withQueryEngine((engine) =>
+      repository
+        ? engine.searchByRepository(repository, query, kind || undefined)
+        : engine.search(query, kind || undefined),
+    );
   });
   app.get("/api/routes", async (request) => {
     const packageName = String(
       (request.query as { package?: string }).package ?? "",
     );
-    return withQueryEngine((engine) => engine.routes(packageName || undefined));
+    const repositoryId = String(
+      (request.query as { repository?: string }).repository ?? "",
+    );
+    return withQueryEngine((engine) =>
+      repositoryId
+        ? engine.routesByRepository(repositoryId, packageName || undefined)
+        : engine.routes(packageName || undefined),
+    );
   });
-  app.get("/api/packages", async () => {
-    return withQueryEngine((engine) => engine.listPackages());
+  app.get("/api/packages", async (request) => {
+    const repositoryId = String(
+      (request.query as { repository?: string }).repository ?? "",
+    );
+    return withQueryEngine((engine) =>
+      repositoryId
+        ? engine.listPackagesByRepository(repositoryId)
+        : engine.listPackages(),
+    );
   });
   app.get("/api/overview", async () => {
     return withQueryEngine((engine) => engine.getPackageOverview());
@@ -102,31 +130,54 @@ export function createGraphTraceApp(
       target = "",
       direction = "both",
       depth,
+      repository,
     } = request.query as {
       target?: string;
       direction?: "in" | "out" | "both";
       depth?: string;
+      repository?: string;
     };
     return withQueryEngine((engine) =>
-      engine.dependencies(target, direction, depth ? Number(depth) : undefined),
+      repository
+        ? engine.dependenciesByRepository(
+            repository,
+            target,
+            direction,
+            depth ? Number(depth) : undefined,
+          )
+        : engine.dependencies(
+            target,
+            direction,
+            depth ? Number(depth) : undefined,
+          ),
     );
   });
   app.get("/api/impact", async (request) => {
-    const { target = "", depth } = request.query as {
+    const { target = "", depth, repository } = request.query as {
       target?: string;
       depth?: string;
+      repository?: string;
     };
     return withQueryEngine((engine) =>
-      engine.impact(target, depth ? Number(depth) : undefined),
+      repository
+        ? engine.impactByRepository(
+            repository,
+            target,
+            depth ? Number(depth) : undefined,
+          )
+        : engine.impact(target, depth ? Number(depth) : undefined),
     );
   });
   app.get("/api/flow", async (request) => {
-    const { target = "", depth } = request.query as {
+    const { target = "", depth, repository } = request.query as {
       target?: string;
       depth?: string;
+      repository?: string;
     };
     return withQueryEngine((engine) =>
-      engine.flow(target, depth ? Number(depth) : undefined),
+      repository
+        ? engine.flowByRepository(repository, target, depth ? Number(depth) : undefined)
+        : engine.flow(target, depth ? Number(depth) : undefined),
     );
   });
   app.get("/assets/*", async (request, reply) => {

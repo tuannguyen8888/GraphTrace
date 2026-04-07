@@ -1,5 +1,8 @@
 import { startTransition, useDeferredValue, useEffect, useState } from "react";
 
+import type { RepositorySummary } from "@graphtrace/shared";
+import { pathBelongsToRepository } from "@graphtrace/shared";
+
 import {
   type ArchitectureGraphEdge,
   type ArchitectureGraphNode,
@@ -55,8 +58,12 @@ const scopeOptions: Array<{
 
 export function App() {
   const [status, setStatus] = useState<WorkspaceStatus | null>(null);
+  const [repositories, setRepositories] = useState<RepositorySummary[]>([]);
   const [packages, setPackages] = useState<PackageSummary[]>([]);
   const [routes, setRoutes] = useState<RouteSummary[]>([]);
+  const [selectedRepositoryId, setSelectedRepositoryId] = useState(() =>
+    readRepositoryFromLocation(),
+  );
   const [scopeMode, setScopeMode] = useState<ScopeMode>("primary");
   const [selectedPackageId, setSelectedPackageId] = useState("");
   const [searchText, setSearchText] = useState("");
@@ -79,23 +86,39 @@ export function App() {
   const [refreshNonce, setRefreshNonce] = useState(0);
   const deferredSearchText = useDeferredValue(searchText);
 
-  const packageEntries = buildPackageEntries(packages, scopeMode);
+  const selectedRepository =
+    repositories.find((entry) => entry.id === selectedRepositoryId) ??
+    repositories[0] ??
+    null;
+  const packageEntries = buildPackageEntries(
+    packages,
+    scopeMode,
+    repositories,
+    selectedRepositoryId,
+  );
   const visibleRoutes = filterRoutesForDisplay(routes, packages, {
+    repositories,
+    selectedRepositoryId,
     scopeMode,
     selectedPackageId,
   });
   const visibleSearchResults = filterSearchResultsForDisplay(
     searchResults,
     scopeMode,
+    repositories,
+    selectedRepositoryId,
   );
   const visibleRouteFlow = routeFlow.filter((item) =>
-    matchesScope(item.path, scopeMode),
+    matchesScope(item.path, scopeMode) &&
+    pathBelongsToRepository(item.path, selectedRepositoryId, repositories),
   );
   const visibleDependencyItems = dependencyItems.filter((item) =>
-    matchesScope(item.path, scopeMode),
+    matchesScope(item.path, scopeMode) &&
+    pathBelongsToRepository(item.path, selectedRepositoryId, repositories),
   );
   const visibleImpactItems = impactItems.filter((item) =>
-    matchesScope(item.path, scopeMode),
+    matchesScope(item.path, scopeMode) &&
+    pathBelongsToRepository(item.path, selectedRepositoryId, repositories),
   );
   const routeInsights = buildRouteInsights(visibleRouteFlow, packages);
   const architectureGraph = buildArchitectureGraph({
@@ -146,17 +169,28 @@ export function App() {
       : "";
 
   useEffect(() => {
-    const refreshToken = refreshNonce;
-    void refreshToken;
     let cancelled = false;
 
     const loadWorkspaceData = async () => {
       try {
+        const repositoriesPayload = await fetchJson<
+          QueryResult<RepositorySummary>
+        >("/api/repositories");
+        const availableRepositories = repositoriesPayload.items ?? [];
+        const nextRepositoryId =
+          availableRepositories.find(
+            (entry) => entry.id === selectedRepositoryId,
+          )?.id ??
+          availableRepositories[0]?.id ??
+          ".";
+        const repositoryQuery = buildRepositoryQuery(nextRepositoryId);
         const [statusPayload, packagesPayload, routesPayload] =
           await Promise.all([
-            fetchJson<WorkspaceStatus>("/api/status"),
-            fetchJson<QueryResult<PackageSummary>>("/api/packages"),
-            fetchJson<QueryResult<RouteSummary>>("/api/routes"),
+            fetchJson<WorkspaceStatus>(`/api/status${repositoryQuery}`),
+            fetchJson<QueryResult<PackageSummary>>(
+              `/api/packages${repositoryQuery}`,
+            ),
+            fetchJson<QueryResult<RouteSummary>>(`/api/routes${repositoryQuery}`),
           ]);
 
         if (cancelled) {
@@ -165,6 +199,8 @@ export function App() {
 
         startTransition(() => {
           setWorkspaceError("");
+          setRepositories(availableRepositories);
+          setSelectedRepositoryId(nextRepositoryId);
           setStatus(statusPayload);
           setPackages(packagesPayload.items ?? []);
           setRoutes(routesPayload.items ?? []);
@@ -180,6 +216,7 @@ export function App() {
               ? error.message
               : "Không tải được workspace state.",
           );
+          setRepositories([]);
           setPackages([]);
           setRoutes([]);
         });
@@ -191,7 +228,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [refreshNonce]);
+  }, [refreshNonce, selectedRepositoryId]);
 
   useEffect(() => {
     if (!deferredSearchText.trim()) {
@@ -203,6 +240,9 @@ export function App() {
       q: deferredSearchText,
       kind: searchKind,
     });
+    if (selectedRepositoryId) {
+      query.set("repository", selectedRepositoryId);
+    }
 
     void fetchJson<QueryResult<SearchResult>>(`/api/search?${query.toString()}`)
       .then((payload) => {
@@ -215,25 +255,24 @@ export function App() {
           setSearchResults([]);
         });
       });
-  }, [deferredSearchText, searchKind]);
+  }, [deferredSearchText, searchKind, selectedRepositoryId]);
 
   useEffect(() => {
     if (inspector.type === "idle") {
       return;
     }
 
-    const refreshToken = refreshNonce;
-    void refreshToken;
     let cancelled = false;
 
     const loadInspector = async () => {
       setDetailLoading(true);
       setDetailError("");
+      const repositoryQuery = buildRepositoryQuery(selectedRepositoryId, true);
 
       try {
         if (inspector.type === "route") {
           const flowPayload = await fetchJson<QueryResult<GraphItem>>(
-            `/api/flow?target=${encodeURIComponent(inspector.route.id)}`,
+            `/api/flow?target=${encodeURIComponent(inspector.route.id)}${repositoryQuery}`,
           );
 
           if (cancelled) {
@@ -251,10 +290,10 @@ export function App() {
         ) {
           const [depsPayload, impactPayload] = await Promise.all([
             fetchJson<QueryResult<GraphItem>>(
-              `/api/deps?target=${encodeURIComponent(inspector.item.path)}&direction=both&depth=2`,
+              `/api/deps?target=${encodeURIComponent(inspector.item.path)}&direction=both&depth=2${repositoryQuery}`,
             ),
             fetchJson<QueryResult<GraphItem>>(
-              `/api/impact?target=${encodeURIComponent(inspector.item.path)}&depth=4`,
+              `/api/impact?target=${encodeURIComponent(inspector.item.path)}&depth=4${repositoryQuery}`,
             ),
           ]);
 
@@ -303,7 +342,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [inspector, refreshNonce]);
+  }, [inspector, refreshNonce, selectedRepositoryId]);
 
   useEffect(() => {
     if (!selectedPackageId) {
@@ -332,6 +371,10 @@ export function App() {
     };
   }, [actionFeedback]);
 
+  useEffect(() => {
+    syncRepositoryToLocation(selectedRepositoryId);
+  }, [selectedRepositoryId]);
+
   const relatedPackageItems = routeInsights.relatedPackages.map((entry) => ({
     id: entry.id,
     kind: "package",
@@ -354,6 +397,32 @@ export function App() {
           </div>
 
           <div className="command-actions">
+            <label className="field repo-picker">
+              <span>Repository</span>
+              <select
+                value={selectedRepositoryId}
+                onChange={(event) => {
+                  const nextRepositoryId = event.target.value;
+                  startTransition(() => {
+                    setSelectedRepositoryId(nextRepositoryId);
+                    setSelectedPackageId("");
+                    setInspector({ type: "idle" });
+                    setRouteFlow([]);
+                    setDependencyItems([]);
+                    setImpactItems([]);
+                    setSearchResults([]);
+                  });
+                }}
+              >
+                {repositories.map((entry) => (
+                  <option key={entry.id} value={entry.id}>
+                    {entry.kind === "primary"
+                      ? `${entry.label} · ${entry.rootPath}`
+                      : `${entry.label} · ${entry.rootPath}`}
+                  </option>
+                ))}
+              </select>
+            </label>
             <button
               className="refresh-button"
               type="button"
@@ -399,6 +468,14 @@ export function App() {
               />
             </dl>
 
+            <div className="meta-block">
+              <span>Repository</span>
+              <strong>{selectedRepository?.label ?? "Đang tải..."}</strong>
+            </div>
+            <div className="meta-block">
+              <span>Repository root</span>
+              <strong>{selectedRepository?.rootPath ?? "Đang tải..."}</strong>
+            </div>
             <div className="meta-block">
               <span>Workspace root</span>
               <strong>{status?.workspaceRoot ?? "Đang tải..."}</strong>
@@ -1223,6 +1300,32 @@ function getSearchSeed(item: Pick<GraphItem, "kind" | "label" | "path">) {
   }
 
   return item.label;
+}
+
+function readRepositoryFromLocation() {
+  if (typeof window === "undefined") {
+    return ".";
+  }
+
+  return new URL(window.location.href).searchParams.get("repository") ?? ".";
+}
+
+function buildRepositoryQuery(repositoryId: string, hasExistingQuery = false) {
+  if (!repositoryId) {
+    return "";
+  }
+
+  return `${hasExistingQuery ? "&" : "?"}repository=${encodeURIComponent(repositoryId)}`;
+}
+
+function syncRepositoryToLocation(repositoryId: string) {
+  if (typeof window === "undefined" || !repositoryId) {
+    return;
+  }
+
+  const url = new URL(window.location.href);
+  url.searchParams.set("repository", repositoryId);
+  window.history.replaceState({}, "", url);
 }
 
 async function fetchJson<T>(url: string): Promise<T> {

@@ -18,6 +18,7 @@ import { createGraphTraceApp } from "../src/index";
 
 const fixtureRoot = join(process.cwd(), "fixtures", "express-prisma-workspace");
 const builtWebRoot = join(process.cwd(), "apps", "web", "dist");
+const selfHostRoot = process.cwd();
 
 describe("server", () => {
   test("exposes APIs and serves the built web UI for an indexed workspace", async () => {
@@ -179,6 +180,67 @@ describe("server", () => {
         await rename(backupDistRoot, builtWebRoot);
       }
       await rm(backupRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("exposes repository-aware APIs for self-host workspaces", async () => {
+    await ensureWorkspaceInitialized(selfHostRoot);
+    await indexWorkspace({ workspaceRoot: selfHostRoot, full: true });
+
+    const app = createGraphTraceApp({
+      workspaceRoot: selfHostRoot,
+    });
+
+    try {
+      const repositories = await app.inject({
+        method: "GET",
+        url: "/api/repositories",
+      });
+      const primaryRoutes = await app.inject({
+        method: "GET",
+        url: "/api/routes?repository=.",
+      });
+      const fixtureRoutes = await app.inject({
+        method: "GET",
+        url: `/api/routes?repository=${encodeURIComponent("fixtures/next-api-workspace")}`,
+      });
+      const fixtureStatus = await app.inject({
+        method: "GET",
+        url: `/api/status?repository=${encodeURIComponent("fixtures/next-api-workspace")}`,
+      });
+
+      const repositoriesPayload = repositories.json();
+      const primaryRoutesPayload = primaryRoutes.json();
+      const fixtureRoutesPayload = fixtureRoutes.json();
+      const fixtureStatusPayload = fixtureStatus.json();
+
+      expect(repositories.statusCode).toBe(200);
+      expect(repositoriesPayload.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: ".",
+          }),
+          expect.objectContaining({
+            id: "fixtures/next-api-workspace",
+          }),
+        ]),
+      );
+      expect(
+        primaryRoutesPayload.items.some(
+          (item: { id: string }) => item.id === "GET /users",
+        ),
+      ).toBe(false);
+      expect(
+        fixtureRoutesPayload.items.some(
+          (item: { id: string }) => item.id === "GET /users",
+        ),
+      ).toBe(true);
+      expect(fixtureStatusPayload.selectedRepositoryId).toBe(
+        "fixtures/next-api-workspace",
+      );
+      expect(fixtureStatusPayload.counts.routeCount).toBeGreaterThan(0);
+    } finally {
+      await app.close();
     }
   });
 });

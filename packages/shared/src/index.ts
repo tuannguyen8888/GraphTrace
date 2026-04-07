@@ -1,5 +1,3 @@
-import { relative, sep } from "node:path";
-
 export const GRAPHTRACE_DIR = ".graphtrace";
 export const GRAPHTRACE_CONFIG_PATH = `${GRAPHTRACE_DIR}/config.json`;
 export const GRAPHTRACE_DB_PATH = `${GRAPHTRACE_DIR}/index.db`;
@@ -134,7 +132,17 @@ export interface GraphTraceStatus {
   dbPath: string;
   counts: IndexSummary;
   units: DiscoveredUnit[];
+  repositories?: RepositorySummary[];
+  selectedRepositoryId?: string;
   lastIndexRun: IndexRunInfo | null;
+}
+
+export interface RepositorySummary {
+  id: string;
+  rootPath: string;
+  label: string;
+  kind: "primary" | "nested";
+  sourceUnitId: string;
 }
 
 export interface IndexWorkspaceOptions {
@@ -168,9 +176,132 @@ export interface CliRunResult {
 }
 
 export function toPosixPath(value: string): string {
-  return value.split(sep).join("/");
+  return value.replaceAll("\\", "/");
 }
 
 export function relativePath(root: string, target: string): string {
-  return toPosixPath(relative(root, target));
+  const from = normalizePathParts(root);
+  const to = normalizePathParts(target);
+
+  if (from.prefix.toLowerCase() !== to.prefix.toLowerCase()) {
+    return toPosixPath(target);
+  }
+
+  let commonIndex = 0;
+  while (
+    commonIndex < from.segments.length &&
+    commonIndex < to.segments.length &&
+    from.segments[commonIndex] === to.segments[commonIndex]
+  ) {
+    commonIndex += 1;
+  }
+
+  const upwardSegments = new Array(
+    Math.max(0, from.segments.length - commonIndex),
+  ).fill("..");
+  const downwardSegments = to.segments.slice(commonIndex);
+  const relativeSegments = [...upwardSegments, ...downwardSegments];
+
+  return relativeSegments.length > 0 ? relativeSegments.join("/") : ".";
+}
+
+export function deriveRepositories(
+  units: DiscoveredUnit[],
+): RepositorySummary[] {
+  const rootUnit =
+    units.find((unit) => unit.rootPath === ".") ??
+    ({
+      id: "unit:root",
+      rootPath: ".",
+      displayName: "Primary workspace",
+    } as const);
+
+  const nestedRepositories = units
+    .filter(
+      (unit) =>
+        unit.rootPath !== "." &&
+        unit.parentUnitId === rootUnit.id &&
+        (unit.kind === "project" ||
+          unit.kind === "subproject" ||
+          unit.kind === "repo"),
+    )
+    .map((unit) => ({
+      id: unit.rootPath,
+      rootPath: unit.rootPath,
+      label: unit.displayName,
+      kind: "nested" as const,
+      sourceUnitId: unit.id,
+    }))
+    .sort((left, right) => left.rootPath.localeCompare(right.rootPath));
+
+  return [
+    {
+      id: ".",
+      rootPath: ".",
+      label: rootUnit.displayName,
+      kind: "primary",
+      sourceUnitId: rootUnit.id,
+    },
+    ...nestedRepositories,
+  ];
+}
+
+export function resolveRepositoryForPath(
+  path: string | undefined,
+  repositories: RepositorySummary[],
+): RepositorySummary | null {
+  if (repositories.length === 0) {
+    return null;
+  }
+
+  const primaryRepository =
+    repositories.find((entry) => entry.kind === "primary") ?? repositories[0];
+
+  if (!path || path === ".") {
+    return primaryRepository;
+  }
+
+  const nestedMatch = repositories
+    .filter((entry) => entry.kind === "nested")
+    .sort((left, right) => right.rootPath.length - left.rootPath.length)
+    .find(
+      (entry) =>
+        path === entry.rootPath || path.startsWith(`${entry.rootPath}/`),
+    );
+
+  return nestedMatch ?? primaryRepository;
+}
+
+export function pathBelongsToRepository(
+  path: string | undefined,
+  repositoryId: string,
+  repositories: RepositorySummary[],
+): boolean {
+  return resolveRepositoryForPath(path, repositories)?.id === repositoryId;
+}
+
+function normalizePathParts(value: string) {
+  const normalized = toPosixPath(value);
+  const driveMatch = normalized.match(/^[A-Za-z]:/);
+  const prefix = driveMatch?.[0] ?? (normalized.startsWith("/") ? "/" : "");
+  const remainder = prefix ? normalized.slice(prefix.length) : normalized;
+  const segments: string[] = [];
+
+  for (const part of remainder.split("/")) {
+    if (!part || part === ".") {
+      continue;
+    }
+
+    if (part === "..") {
+      segments.pop();
+      continue;
+    }
+
+    segments.push(part);
+  }
+
+  return {
+    prefix,
+    segments,
+  };
 }
