@@ -1,74 +1,64 @@
 import { startTransition, useDeferredValue, useEffect, useState } from "react";
 
-interface IndexRunInfo {
-  mode: string;
-  completedAt: string | null;
-}
-
-interface WorkspaceStatus {
-  workspaceRoot: string;
-  dbPath: string;
-  counts: {
-    packageCount: number;
-    fileCount: number;
-    symbolCount: number;
-    routeCount: number;
-    queryEdgeCount: number;
-  };
-  lastIndexRun: IndexRunInfo | null;
-}
-
-interface RouteSummary {
-  id: string;
-  method: string;
-  path: string;
-  filePath: string;
-  framework: string;
-  confidence: number;
-}
-
-interface PackageSummary {
-  id: string;
-  label: string;
-  path?: string;
-}
-
-interface SearchResult {
-  id: string;
-  kind: string;
-  label: string;
-  path?: string;
-  score?: number;
-}
-
-interface GraphItem {
-  id: string;
-  kind: string;
-  label: string;
-  path?: string;
-  confidence?: number;
-}
-
-interface QueryResult<T> {
-  items: T[];
-}
+import {
+  buildGraphTraceCommand,
+  buildPackageEntries,
+  buildRouteInsights,
+  filterRoutesForDisplay,
+  filterSearchResultsForDisplay,
+  findOwningPackage,
+  looksLikeSourcePath,
+  matchesScope,
+  type GraphItem,
+  type PackageListEntry,
+  type PackageSummary,
+  type QueryResult,
+  type RouteSummary,
+  type ScopeMode,
+  type SearchResult,
+  type WorkspaceStatus,
+} from "./view-model";
 
 type InspectorMode =
   | { type: "idle" }
   | { type: "route"; route: RouteSummary }
   | { type: "search"; item: SearchResult };
 
+const scopeOptions: Array<{
+  id: ScopeMode;
+  label: string;
+  description: string;
+}> = [
+  {
+    id: "primary",
+    label: "Primary workspace",
+    description: "Ẩn fixtures để repo chính nổi bật hơn.",
+  },
+  {
+    id: "all",
+    label: "Include fixtures",
+    description: "Hiện toàn bộ packages, routes, và search hits.",
+  },
+  {
+    id: "tests",
+    label: "Tests only",
+    description: "Tập trung vào fixtures và các file test.",
+  },
+];
+
 export function App() {
   const [status, setStatus] = useState<WorkspaceStatus | null>(null);
   const [packages, setPackages] = useState<PackageSummary[]>([]);
   const [routes, setRoutes] = useState<RouteSummary[]>([]);
-  const [selectedPackage, setSelectedPackage] = useState("");
+  const [scopeMode, setScopeMode] = useState<ScopeMode>("primary");
+  const [selectedPackageId, setSelectedPackageId] = useState("");
   const [searchText, setSearchText] = useState("");
   const [searchKind, setSearchKind] = useState("symbol");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [inspector, setInspector] = useState<InspectorMode>({ type: "idle" });
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
+  const [actionFeedback, setActionFeedback] = useState("");
   const [routeFlow, setRouteFlow] = useState<GraphItem[]>([]);
   const [dependencyItems, setDependencyItems] = useState<GraphItem[]>([]);
   const [impactItems, setImpactItems] = useState<GraphItem[]>([]);
@@ -76,25 +66,70 @@ export function App() {
   const [refreshNonce, setRefreshNonce] = useState(0);
   const deferredSearchText = useDeferredValue(searchText);
 
+  const packageEntries = buildPackageEntries(packages, scopeMode);
+  const visibleRoutes = filterRoutesForDisplay(routes, packages, {
+    scopeMode,
+    selectedPackageId,
+  });
+  const visibleSearchResults = filterSearchResultsForDisplay(
+    searchResults,
+    scopeMode,
+  );
+  const visibleRouteFlow = routeFlow.filter((item) =>
+    matchesScope(item.path, scopeMode),
+  );
+  const visibleDependencyItems = dependencyItems.filter((item) =>
+    matchesScope(item.path, scopeMode),
+  );
+  const visibleImpactItems = impactItems.filter((item) =>
+    matchesScope(item.path, scopeMode),
+  );
+  const routeInsights = buildRouteInsights(visibleRouteFlow, packages);
+  const selectedPath =
+    inspector.type === "route"
+      ? inspector.route.filePath
+      : inspector.type === "search"
+        ? inspector.item.path
+        : undefined;
+  const selectedPackage = findOwningPackage(selectedPath, packages);
+  const selectedTitle =
+    inspector.type === "route"
+      ? inspector.route.id
+      : inspector.type === "search"
+        ? inspector.item.label
+        : "";
+  const selectedSummary =
+    inspector.type === "route"
+      ? `${inspector.route.framework} · ${formatConfidence(inspector.route.confidence)}`
+      : (selectedPath ?? "Không có file path để trace.");
+  const selectedCommand =
+    inspector.type === "idle"
+      ? ""
+      : buildGraphTraceCommand(
+          inspector.type === "route"
+            ? {
+                id: inspector.route.id,
+                kind: "route",
+                label: inspector.route.id,
+                path: inspector.route.filePath,
+              }
+            : inspector.item,
+        );
+  const selectedFileHref =
+    status?.workspaceRoot && selectedPath
+      ? `file://${encodeURI(joinPath(status.workspaceRoot, selectedPath))}`
+      : "";
+
   useEffect(() => {
     let cancelled = false;
-    const workspaceRefreshMarker = refreshNonce;
-    void workspaceRefreshMarker;
 
     const loadWorkspaceData = async () => {
-      const query = new URLSearchParams();
-      if (selectedPackage) {
-        query.set("package", selectedPackage);
-      }
-
       try {
         const [statusPayload, packagesPayload, routesPayload] =
           await Promise.all([
             fetchJson<WorkspaceStatus>("/api/status"),
             fetchJson<QueryResult<PackageSummary>>("/api/packages"),
-            fetchJson<QueryResult<RouteSummary>>(
-              `/api/routes?${query.toString()}`,
-            ),
+            fetchJson<QueryResult<RouteSummary>>("/api/routes"),
           ]);
 
         if (cancelled) {
@@ -129,7 +164,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [refreshNonce, selectedPackage]);
+  }, [refreshNonce]);
 
   useEffect(() => {
     if (!deferredSearchText.trim()) {
@@ -161,8 +196,6 @@ export function App() {
     }
 
     let cancelled = false;
-    const inspectorRefreshMarker = refreshNonce;
-    void inspectorRefreshMarker;
 
     const loadInspector = async () => {
       setDetailLoading(true);
@@ -243,6 +276,40 @@ export function App() {
     };
   }, [inspector, refreshNonce]);
 
+  useEffect(() => {
+    if (!selectedPackageId) {
+      return;
+    }
+
+    const packageStillVisible = packageEntries.some(
+      (entry) => entry.id === selectedPackageId,
+    );
+    if (!packageStillVisible) {
+      setSelectedPackageId("");
+    }
+  }, [packageEntries, selectedPackageId]);
+
+  useEffect(() => {
+    if (!actionFeedback) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setActionFeedback("");
+    }, 2200);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [actionFeedback]);
+
+  const relatedPackageItems = routeInsights.relatedPackages.map((entry) => ({
+    id: entry.id,
+    kind: "package",
+    label: entry.label,
+    path: entry.path,
+  }));
+
   return (
     <main className="app-shell">
       <section className="app-frame">
@@ -251,8 +318,9 @@ export function App() {
             <span className="eyebrow">LOCAL-FIRST CODE GRAPH</span>
             <h1>GraphTrace</h1>
             <p>
-              Search code, inspect routes, and trace likely blast radius from a
-              single local graph store.
+              Search code, inspect routes, and keep drilling from files,
+              dependencies, impact, and flow without falling back to repo-wide
+              scans too early.
             </p>
           </div>
 
@@ -289,10 +357,7 @@ export function App() {
             </div>
 
             <dl className="metric-grid">
-              <Metric
-                label="Packages"
-                value={status?.counts.packageCount ?? 0}
-              />
+              <Metric label="Packages" value={status?.counts.packageCount ?? 0} />
               <Metric label="Files" value={status?.counts.fileCount ?? 0} />
               <Metric label="Symbols" value={status?.counts.symbolCount ?? 0} />
               <Metric label="Routes" value={status?.counts.routeCount ?? 0} />
@@ -318,45 +383,73 @@ export function App() {
             <div className="panel-divider" />
 
             <div className="panel-heading compact">
+              <span className="panel-kicker">Workspace scope</span>
+              <h2>Triage lens</h2>
+            </div>
+
+            <div className="scope-toggle">
+              {scopeOptions.map((option) => (
+                <button
+                  key={option.id}
+                  className={
+                    scopeMode === option.id
+                      ? "scope-option is-active"
+                      : "scope-option"
+                  }
+                  type="button"
+                  onClick={() => setScopeMode(option.id)}
+                >
+                  <strong>{option.label}</strong>
+                  <span>{option.description}</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="panel-divider" />
+
+            <div className="panel-heading compact">
               <span className="panel-kicker">Packages</span>
               <h2>Route filter</h2>
             </div>
 
             <label className="field">
-              <span>Scope route explorer</span>
+              <span>Filter by package</span>
               <select
-                value={selectedPackage}
-                onChange={(event) => setSelectedPackage(event.target.value)}
+                value={selectedPackageId}
+                onChange={(event) => setSelectedPackageId(event.target.value)}
               >
-                <option value="">All packages</option>
-                {packages.map((entry) => (
-                  <option key={entry.id} value={entry.label}>
+                <option value="">All visible packages</option>
+                {packageEntries.map((entry) => (
+                  <option key={entry.id} value={entry.id}>
                     {entry.label}
+                    {entry.disambiguation ? ` · ${entry.secondaryLabel}` : ""}
                   </option>
                 ))}
               </select>
             </label>
 
-            <ul className="stack-list">
-              {packages.map((entry) => (
+            <ul className="stack-list package-list">
+              {packageEntries.map((entry) => (
                 <li key={entry.id}>
                   <button
                     className={
-                      entry.label === selectedPackage
+                      entry.id === selectedPackageId
                         ? "list-item is-active"
                         : "list-item"
                     }
                     type="button"
                     onClick={() =>
-                      setSelectedPackage((current) =>
-                        current === entry.label ? "" : entry.label,
+                      setSelectedPackageId((current) =>
+                        current === entry.id ? "" : entry.id,
                       )
                     }
                   >
+                    <span className="list-chip">{formatScopeLabel(entry.scope)}</span>
                     <span className="list-title">{entry.label}</span>
-                    <span className="list-meta">
-                      {entry.path ?? "package root"}
-                    </span>
+                    <span className="list-meta">{entry.secondaryLabel}</span>
+                    {entry.disambiguation ? (
+                      <span className="list-subtle">Duplicate label, path used to disambiguate.</span>
+                    ) : null}
                   </button>
                 </li>
               ))}
@@ -368,6 +461,10 @@ export function App() {
               <div className="panel-heading">
                 <span className="panel-kicker">Search results</span>
                 <h2>Symbol and file workbench</h2>
+                <p>
+                  Tập trung vào repo chính trước, rồi mở rộng sang fixtures khi
+                  cần đối chiếu.
+                </p>
               </div>
 
               <div className="control-row">
@@ -376,7 +473,7 @@ export function App() {
                   <input
                     value={searchText}
                     onChange={(event) => setSearchText(event.target.value)}
-                    placeholder="listUsers, users.ts, /users..."
+                    placeholder="runCli, packages/server, /api/impact..."
                   />
                 </label>
                 <label className="field">
@@ -394,49 +491,40 @@ export function App() {
               </div>
 
               <ul className="stack-list results-list">
-                {searchResults.length === 0 ? (
+                {visibleSearchResults.length === 0 ? (
                   <li className="empty-state">
-                    Gõ query để xem symbol, route, file, hoặc package match.
+                    Gõ query để xem symbol, route, file, hoặc package match theo
+                    scope hiện tại.
                   </li>
                 ) : (
-                  searchResults.map((item) => (
-                    <li key={`${item.kind}:${item.id}`}>
-                      <button
-                        className={
-                          inspector.type === "search" &&
-                          inspector.item.id === item.id
-                            ? "list-item is-active"
-                            : "list-item"
-                        }
-                        type="button"
-                        onClick={() => {
-                          if (item.kind === "route") {
-                            const matchingRoute =
-                              routes.find((route) => route.id === item.id) ??
-                              null;
-                            if (matchingRoute) {
-                              setInspector({
-                                type: "route",
-                                route: matchingRoute,
-                              });
-                              return;
-                            }
+                  visibleSearchResults.map((item) => {
+                    const owningPackage = findOwningPackage(item.path, packages);
+                    return (
+                      <li key={`${item.kind}:${item.id}`}>
+                        <button
+                          className={
+                            inspector.type === "search" &&
+                            inspector.item.id === item.id
+                              ? "list-item is-active"
+                              : "list-item"
                           }
-
-                          setInspector({
-                            type: "search",
-                            item,
-                          });
-                        }}
-                      >
-                        <span className="list-chip">{item.kind}</span>
-                        <span className="list-title">{item.label}</span>
-                        <span className="list-meta">
-                          {item.path ?? `score ${item.score ?? 0}`}
-                        </span>
-                      </button>
-                    </li>
-                  ))
+                          type="button"
+                          onClick={() => inspectSearchResult(item, routes, setInspector)}
+                        >
+                          <span className="list-chip">{item.kind}</span>
+                          <span className="list-title">{item.label}</span>
+                          <span className="list-meta">
+                            {item.path ?? `score ${item.score ?? 0}`}
+                          </span>
+                          {owningPackage?.label ? (
+                            <span className="list-subtle">
+                              {owningPackage.label} · {owningPackage.path}
+                            </span>
+                          ) : null}
+                        </button>
+                      </li>
+                    );
+                  })
                 )}
               </ul>
             </article>
@@ -445,43 +533,51 @@ export function App() {
               <div className="panel-heading">
                 <span className="panel-kicker">Route explorer</span>
                 <h2>HTTP surface</h2>
+                <p>
+                  Route list được lọc theo scope và package thực tế, không còn
+                  phụ thuộc vào package label mơ hồ.
+                </p>
               </div>
 
               <ul className="stack-list results-list">
-                {routes.length === 0 ? (
+                {visibleRoutes.length === 0 ? (
                   <li className="empty-state">
-                    Chưa có route match với package filter hiện tại.
+                    Không có route nào trong scope hoặc package hiện tại.
                   </li>
                 ) : (
-                  routes.map((route) => (
-                    <li key={route.id}>
-                      <button
-                        className={
-                          inspector.type === "route" &&
-                          inspector.route.id === route.id
-                            ? "list-item is-active"
-                            : "list-item"
-                        }
-                        type="button"
-                        onClick={() => {
-                          setInspector({
-                            type: "route",
-                            route,
-                          });
-                        }}
-                      >
-                        <span className="route-line">
-                          <span className="method-chip">{route.method}</span>
-                          <span className="list-title">{route.path}</span>
-                        </span>
-                        <span className="list-meta">
-                          {route.framework} ·{" "}
-                          {formatConfidence(route.confidence)} ·{" "}
-                          {route.filePath}
-                        </span>
-                      </button>
-                    </li>
-                  ))
+                  visibleRoutes.map((route) => {
+                    const owningPackage = findOwningPackage(route.filePath, packages);
+                    return (
+                      <li key={route.id}>
+                        <button
+                          className={
+                            inspector.type === "route" &&
+                            inspector.route.id === route.id
+                              ? "list-item is-active route-item"
+                              : "list-item route-item"
+                          }
+                          type="button"
+                          onClick={() => {
+                            setInspector({
+                              type: "route",
+                              route,
+                            });
+                          }}
+                        >
+                          <span className="route-line">
+                            <span className="method-chip">{route.method}</span>
+                            <span className="route-path">{route.path}</span>
+                          </span>
+                          <span className="route-meta-line">
+                            <span>{route.framework}</span>
+                            <span>{formatConfidence(route.confidence)}</span>
+                            <span>{owningPackage?.label ?? "unmapped package"}</span>
+                          </span>
+                          <span className="list-meta">{route.filePath}</span>
+                        </button>
+                      </li>
+                    );
+                  })
                 )}
               </ul>
             </article>
@@ -491,12 +587,16 @@ export function App() {
             <div className="panel-heading">
               <span className="panel-kicker">Detail pane</span>
               <h2>Inspector</h2>
+              <p>
+                Chọn route, file, dependency, impact item, hoặc query hint để
+                tiếp tục drill-down.
+              </p>
             </div>
 
             {inspector.type === "idle" ? (
               <div className="empty-state inspector-empty">
-                Chọn một route hoặc search result để xem flow, dependencies, và
-                impact.
+                Chọn một route hoặc search result để xem flow, dependencies,
+                impact, và quick actions.
               </div>
             ) : (
               <>
@@ -504,18 +604,82 @@ export function App() {
                   <span className="list-chip">
                     {inspector.type === "route" ? "route" : inspector.item.kind}
                   </span>
-                  <h3>
-                    {inspector.type === "route"
-                      ? inspector.route.id
-                      : inspector.item.label}
-                  </h3>
-                  <p>
-                    {inspector.type === "route"
-                      ? `${inspector.route.framework} · ${formatConfidence(
-                          inspector.route.confidence,
-                        )}`
-                      : (inspector.item.path ?? "Không có file path để trace.")}
-                  </p>
+                  <h3>{selectedTitle}</h3>
+                  <p>{selectedSummary}</p>
+                  {selectedPackage ? (
+                    <p className="inspector-supporting">
+                      {selectedPackage.label} · {selectedPackage.path}
+                    </p>
+                  ) : null}
+
+                  <div className="action-row">
+                    <button
+                      className="ghost-button"
+                      type="button"
+                      disabled={!selectedPath}
+                      onClick={() => {
+                        if (selectedPath) {
+                          void copyToClipboard(
+                            selectedPath,
+                            "Đã copy file path.",
+                            setActionFeedback,
+                          );
+                        }
+                      }}
+                    >
+                      Copy path
+                    </button>
+                    <button
+                      className="ghost-button"
+                      type="button"
+                      disabled={!selectedCommand}
+                      onClick={() => {
+                        if (selectedCommand) {
+                          void copyToClipboard(
+                            selectedCommand,
+                            "Đã copy GraphTrace command.",
+                            setActionFeedback,
+                          );
+                        }
+                      }}
+                    >
+                      Copy command
+                    </button>
+                    <button
+                      className="ghost-button"
+                      type="button"
+                      onClick={() => {
+                        runSearchFromItem(
+                          inspector.type === "route"
+                            ? {
+                                id: inspector.route.id,
+                                kind: "route",
+                                label: inspector.route.id,
+                                path: inspector.route.filePath,
+                              }
+                            : inspector.item,
+                          setSearchKind,
+                          setSearchText,
+                        );
+                      }}
+                    >
+                      Re-run search
+                    </button>
+                    {selectedFileHref ? (
+                      <a
+                        className="ghost-button is-link"
+                        href={selectedFileHref}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Open file
+                      </a>
+                    ) : null}
+                  </div>
+
+                  {actionFeedback ? (
+                    <p className="action-feedback">{actionFeedback}</p>
+                  ) : null}
                 </div>
 
                 {detailLoading ? (
@@ -528,22 +692,99 @@ export function App() {
                 ) : null}
 
                 {inspector.type === "route" ? (
-                  <InspectorSection
-                    title="Route flow"
-                    subtitle="Đường đi từ route sang file và query hints."
-                    items={routeFlow}
-                  />
+                  <>
+                    <InspectorSection
+                      title="Route flow"
+                      subtitle="Click vào từng file, package, hoặc query hint để tiếp tục trace."
+                      items={visibleRouteFlow}
+                      workspaceRoot={status?.workspaceRoot}
+                      onSelectItem={(item) =>
+                        inspectGraphItem(
+                          item,
+                          packages,
+                          routes,
+                          setInspector,
+                          setSelectedPackageId,
+                          setSearchKind,
+                          setSearchText,
+                        )
+                      }
+                      onFeedback={setActionFeedback}
+                    />
+                    <InspectorSection
+                      title="Related packages"
+                      subtitle="Packages liên quan trực tiếp tới các file trong route flow."
+                      items={relatedPackageItems}
+                      workspaceRoot={status?.workspaceRoot}
+                      onSelectItem={(item) =>
+                        inspectGraphItem(
+                          item,
+                          packages,
+                          routes,
+                          setInspector,
+                          setSelectedPackageId,
+                          setSearchKind,
+                          setSearchText,
+                        )
+                      }
+                      onFeedback={setActionFeedback}
+                    />
+                    <InspectorSection
+                      title="Query hints"
+                      subtitle="Những query heuristics GraphTrace tìm thấy dọc route flow."
+                      items={routeInsights.queryHints}
+                      workspaceRoot={status?.workspaceRoot}
+                      onSelectItem={(item) =>
+                        inspectGraphItem(
+                          item,
+                          packages,
+                          routes,
+                          setInspector,
+                          setSelectedPackageId,
+                          setSearchKind,
+                          setSearchText,
+                        )
+                      }
+                      onFeedback={setActionFeedback}
+                    />
+                  </>
                 ) : (
                   <>
                     <InspectorSection
                       title="Dependencies"
                       subtitle="Inbound và outbound trong bán kính 2 bước."
-                      items={dependencyItems}
+                      items={visibleDependencyItems}
+                      workspaceRoot={status?.workspaceRoot}
+                      onSelectItem={(item) =>
+                        inspectGraphItem(
+                          item,
+                          packages,
+                          routes,
+                          setInspector,
+                          setSelectedPackageId,
+                          setSearchKind,
+                          setSearchText,
+                        )
+                      }
+                      onFeedback={setActionFeedback}
                     />
                     <InspectorSection
                       title="Impact"
                       subtitle="Những file và route dễ bị ảnh hưởng nếu chỉnh file này."
-                      items={impactItems}
+                      items={visibleImpactItems}
+                      workspaceRoot={status?.workspaceRoot}
+                      onSelectItem={(item) =>
+                        inspectGraphItem(
+                          item,
+                          packages,
+                          routes,
+                          setInspector,
+                          setSelectedPackageId,
+                          setSearchKind,
+                          setSearchText,
+                        )
+                      }
+                      onFeedback={setActionFeedback}
                     />
                   </>
                 )}
@@ -569,6 +810,9 @@ function InspectorSection(props: {
   title: string;
   subtitle: string;
   items: GraphItem[];
+  workspaceRoot?: string;
+  onSelectItem: (item: GraphItem) => void;
+  onFeedback: (message: string) => void;
 }) {
   return (
     <section className="inspector-section">
@@ -583,22 +827,197 @@ function InspectorSection(props: {
             Không có item nào trong vùng trace này.
           </li>
         ) : (
-          props.items.map((item) => (
-            <li key={item.id} className="inspector-row">
-              <span className="list-chip">{item.kind}</span>
-              <span className="list-title">{item.label}</span>
-              <span className="list-meta">
-                {item.path ?? item.id}
-                {typeof item.confidence === "number"
-                  ? ` · ${formatConfidence(item.confidence)}`
-                  : ""}
-              </span>
-            </li>
-          ))
+          props.items.map((item) => {
+            const itemCommand = buildGraphTraceCommand(item);
+            const itemFileHref =
+              props.workspaceRoot && item.path
+                ? `file://${encodeURI(joinPath(props.workspaceRoot, item.path))}`
+                : "";
+
+            return (
+              <li key={item.id} className="inspector-row">
+                <button
+                  className="inspector-row-main"
+                  type="button"
+                  onClick={() => props.onSelectItem(item)}
+                >
+                  <span className="list-chip">{item.kind}</span>
+                  <span className="list-title">{item.label}</span>
+                  <span className="list-meta">
+                    {item.path ?? item.id}
+                    {typeof item.confidence === "number"
+                      ? ` · ${formatConfidence(item.confidence)}`
+                      : ""}
+                  </span>
+                </button>
+
+                <div className="inspector-row-actions">
+                  <button
+                    className="mini-action"
+                    type="button"
+                    disabled={!item.path}
+                    onClick={() => {
+                      if (item.path) {
+                        void copyToClipboard(
+                          item.path,
+                          "Đã copy file path.",
+                          props.onFeedback,
+                        );
+                      }
+                    }}
+                  >
+                    Copy path
+                  </button>
+                  <button
+                    className="mini-action"
+                    type="button"
+                    onClick={() => {
+                      void copyToClipboard(
+                        itemCommand,
+                        "Đã copy GraphTrace command.",
+                        props.onFeedback,
+                      );
+                    }}
+                  >
+                    Copy command
+                  </button>
+                  {itemFileHref ? (
+                    <a
+                      className="mini-action is-link"
+                      href={itemFileHref}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open file
+                    </a>
+                  ) : null}
+                </div>
+              </li>
+            );
+          })
         )}
       </ul>
     </section>
   );
+}
+
+function inspectSearchResult(
+  item: SearchResult,
+  routes: RouteSummary[],
+  setInspector: (value: InspectorMode) => void,
+) {
+  if (item.kind === "route") {
+    const matchingRoute = routes.find((route) => route.id === item.id) ?? null;
+    if (matchingRoute) {
+      setInspector({
+        type: "route",
+        route: matchingRoute,
+      });
+      return;
+    }
+  }
+
+  setInspector({
+    type: "search",
+    item,
+  });
+}
+
+function inspectGraphItem(
+  item: GraphItem,
+  packages: PackageSummary[],
+  routes: RouteSummary[],
+  setInspector: (value: InspectorMode) => void,
+  setSelectedPackageId: (value: string | ((current: string) => string)) => void,
+  setSearchKind: (value: string) => void,
+  setSearchText: (value: string) => void,
+) {
+  if (item.kind === "route") {
+    const matchingRoute = routes.find((route) => route.id === item.id);
+    if (matchingRoute) {
+      setInspector({ type: "route", route: matchingRoute });
+      return;
+    }
+  }
+
+  if (item.kind === "package") {
+    const matchingPackage =
+      packages.find((entry) => entry.id === item.id) ??
+      packages.find((entry) => entry.path === item.path) ??
+      packages.find((entry) => entry.label === item.label);
+
+    if (matchingPackage) {
+      setSelectedPackageId(matchingPackage.id);
+      startTransition(() => {
+        setSearchKind("package");
+        setSearchText(matchingPackage.label);
+      });
+    }
+    return;
+  }
+
+  if (item.path && looksLikeSourcePath(item.path)) {
+    setInspector({
+      type: "search",
+      item: {
+        id: item.id,
+        kind: item.kind === "query" ? "file" : item.kind,
+        label: item.kind === "query" ? item.path : item.label,
+        path: item.path,
+      },
+    });
+    return;
+  }
+
+  startTransition(() => {
+    setSearchKind(preferredSearchKind(item.kind));
+    setSearchText(getSearchSeed(item));
+  });
+}
+
+async function copyToClipboard(
+  value: string,
+  message: string,
+  setFeedback: (message: string) => void,
+) {
+  try {
+    await navigator.clipboard.writeText(value);
+    setFeedback(message);
+  } catch {
+    setFeedback("Clipboard API không khả dụng trong browser này.");
+  }
+}
+
+function runSearchFromItem(
+  item: Pick<GraphItem, "kind" | "label" | "path">,
+  setSearchKind: (value: string) => void,
+  setSearchText: (value: string) => void,
+) {
+  startTransition(() => {
+    setSearchKind(preferredSearchKind(item.kind));
+    setSearchText(getSearchSeed(item));
+  });
+}
+
+function preferredSearchKind(kind: string) {
+  if (kind === "route" || kind === "file" || kind === "package") {
+    return kind;
+  }
+
+  return "symbol";
+}
+
+function getSearchSeed(item: Pick<GraphItem, "kind" | "label" | "path">) {
+  if (item.kind === "route") {
+    return item.label;
+  }
+
+  if (item.path) {
+    const segments = item.path.split("/");
+    return segments[segments.length - 1] ?? item.path;
+  }
+
+  return item.label;
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -627,6 +1046,21 @@ function formatConfidence(value?: number) {
   return `${Math.round(value * 100)}% confidence`;
 }
 
-function looksLikeSourcePath(path?: string) {
-  return Boolean(path && /\.(ts|tsx|js|jsx)$/.test(path));
+function formatScopeLabel(scope: PackageListEntry["scope"]) {
+  switch (scope) {
+    case "primary":
+      return "repo";
+    case "test":
+      return "test";
+    case "fixture":
+      return "fixture";
+  }
+}
+
+function joinPath(root: string, path: string) {
+  if (path === ".") {
+    return root;
+  }
+
+  return `${root.replace(/\/$/, "")}/${path.replace(/^\.\//, "")}`;
 }
