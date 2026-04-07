@@ -8,12 +8,44 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawn } from "node:child_process";
 import { describe, expect, test } from "vitest";
 
 import { ensureWorkspaceInitialized } from "@graphtrace/config";
 import { indexWorkspace } from "@graphtrace/indexer";
 
 import { runCli } from "../src/index";
+
+function runCliProcess(
+  cwd: string,
+  args: string[],
+): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const child = spawn(
+      "pnpm",
+      ["exec", "tsx", join(process.cwd(), "packages", "cli", "src", "bin.ts"), ...args],
+      {
+        cwd,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: {
+          ...process.env,
+          FORCE_COLOR: "0",
+        },
+      },
+    );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("close", (code) => {
+      resolve({ code, stdout, stderr });
+    });
+  });
+}
 
 describe("cli", () => {
   const fixtureRoot = join(
@@ -446,6 +478,43 @@ describe("cli", () => {
       false,
     );
   });
+
+  test("concurrent query commands do not hit SQLITE_BUSY", async () => {
+    const workspaceRoot = process.cwd();
+    await ensureWorkspaceInitialized(workspaceRoot);
+    await indexWorkspace({ workspaceRoot, full: true });
+
+    const results = await Promise.all([
+      runCliProcess(workspaceRoot, ["status", "--json"]),
+      runCliProcess(workspaceRoot, ["routes"]),
+      runCliProcess(workspaceRoot, ["flow", "GET /api/impact"]),
+      runCliProcess(workspaceRoot, [
+        "deps",
+        "packages/server/src/index.ts",
+        "--direction",
+        "out",
+        "--depth",
+        "2",
+      ]),
+      runCliProcess(workspaceRoot, [
+        "impact",
+        "packages/server/src/index.ts",
+        "--depth",
+        "4",
+      ]),
+      runCliProcess(workspaceRoot, ["search", "runCli", "--kind", "symbol"]),
+    ]);
+
+    expect(results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 0 }),
+      ]),
+    );
+    expect(results.every((result) => result.code === 0)).toBe(true);
+    expect(
+      results.every((result) => !result.stderr.includes("database is locked")),
+    ).toBe(true);
+  }, 20_000);
 
   test("impact honors --depth", async () => {
     await ensureWorkspaceInitialized(fixtureRoot);

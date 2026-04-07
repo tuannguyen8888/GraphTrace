@@ -62,4 +62,45 @@ describe("storage", () => {
       store.close();
     }
   });
+
+  test("read-only graph store can query while a writer holds an immediate transaction", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "graphtrace-storage-"));
+    const dbPath = join(workspaceRoot, ".graphtrace", "index.db");
+    const writer = openGraphStore(dbPath);
+
+    try {
+      writer.upsertUnit({
+        id: "unit:packages/server",
+        rootPath: "packages/server",
+        displayName: "@graphtrace/server",
+        kind: "package",
+        language: "js-ts",
+        tooling: "pnpm",
+        indexingMode: "full",
+        confidence: 100,
+        signals: ["package.json"],
+        sourceRoots: ["packages/server/src"],
+        pluginMatches: [],
+      });
+
+      writer.db.exec("BEGIN IMMEDIATE");
+      writer.upsertPackage({
+        id: "package:packages/server",
+        name: "@graphtrace/server",
+        rootPath: "packages/server",
+        unitId: "unit:packages/server",
+      });
+
+      const reader = openGraphStore(dbPath, { readOnly: true, timeout: 500 });
+
+      try {
+        expect(reader.stats().packageCount).toBe(0);
+      } finally {
+        reader.close();
+      }
+    } finally {
+      writer.db.exec("ROLLBACK");
+      writer.close();
+    }
+  });
 });
