@@ -42,6 +42,11 @@ const packages: PackageSummary[] = [
     label: "graphtrace",
     path: "packages/cli",
   },
+  {
+    id: "package:.",
+    label: "graphtrace-workspace",
+    path: ".",
+  },
 ];
 
 const routes: RouteSummary[] = [
@@ -51,6 +56,14 @@ const routes: RouteSummary[] = [
     path: "/api/impact",
     filePath: "packages/server/src/index.ts",
     framework: "fastify",
+    confidence: 0.95,
+  },
+  {
+    id: "GET /admins",
+    method: "GET",
+    path: "/admins",
+    filePath: "packages/cli/test/watch.test.ts",
+    framework: "express",
     confidence: 0.95,
   },
   {
@@ -159,6 +172,9 @@ describe("web ui view-model", () => {
 
   test("filters fixtures out of the default primary scope but keeps them for tests scope", () => {
     expect(matchesScope("packages/server/src/index.ts", "primary")).toBe(true);
+    expect(matchesScope("packages/cli/test/cli.test.ts", "primary")).toBe(
+      false,
+    );
     expect(
       matchesScope(
         "fixtures/express-prisma-workspace/apps/api/src/routes/users.ts",
@@ -190,8 +206,25 @@ describe("web ui view-model", () => {
     );
   });
 
+  test("keeps the workspace shell package after concrete repo packages in primary mode", () => {
+    const repositories = deriveRepositories(units);
+    const entries = buildPackageEntries(packages, "primary", repositories, ".");
+
+    expect(entries.map((entry) => entry.id)).toContain("package:packages/cli");
+    expect(entries.map((entry) => entry.id)).toContain(
+      "package:packages/server",
+    );
+    expect(entries.at(-1)?.id).toBe("package:.");
+  });
+
   test("filters routes using package id rather than ambiguous package label", () => {
     const repositories = deriveRepositories(units);
+    const primaryRoutes = filterRoutesForDisplay(routes, packages, {
+      repositories,
+      selectedRepositoryId: ".",
+      scopeMode: "primary",
+      selectedPackageId: "",
+    });
     const serverRoutes = filterRoutesForDisplay(routes, packages, {
       repositories,
       selectedRepositoryId: ".",
@@ -205,6 +238,7 @@ describe("web ui view-model", () => {
       selectedPackageId: "package:fixtures/express-prisma-workspace/apps/api",
     });
 
+    expect(primaryRoutes.map((route) => route.id)).toEqual(["GET /api/impact"]);
     expect(serverRoutes.map((route) => route.id)).toEqual(["GET /api/impact"]);
     expect(fixtureRoutes.map((route) => route.id)).toEqual(["GET /users"]);
   });
