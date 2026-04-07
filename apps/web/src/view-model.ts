@@ -1,3 +1,6 @@
+import type { DiscoveredUnit, RepositorySummary } from "@graphtrace/shared";
+import { pathBelongsToRepository } from "@graphtrace/shared";
+
 export interface IndexRunInfo {
   mode: string;
   completedAt: string | null;
@@ -6,6 +9,9 @@ export interface IndexRunInfo {
 export interface WorkspaceStatus {
   workspaceRoot: string;
   dbPath: string;
+  units: DiscoveredUnit[];
+  repositories?: RepositorySummary[];
+  selectedRepositoryId?: string;
   counts: {
     packageCount: number;
     fileCount: number;
@@ -61,6 +67,8 @@ export interface PackageListEntry extends PackageSummary {
 }
 
 export interface RouteFilterOptions {
+  repositories?: RepositorySummary[];
+  selectedRepositoryId?: string;
   scopeMode: ScopeMode;
   selectedPackageId: string;
 }
@@ -108,17 +116,29 @@ export function matchesScope(path: string | undefined, scopeMode: ScopeMode) {
 export function buildPackageEntries(
   packages: PackageSummary[],
   scopeMode: ScopeMode,
+  repositories: RepositorySummary[] = [],
+  selectedRepositoryId = ".",
 ): PackageListEntry[] {
   const filteredPackages = packages.filter((entry) =>
     matchesScope(entry.path, scopeMode),
   );
+  const repositoryScopedPackages =
+    repositories.length > 0
+      ? filteredPackages.filter((entry) =>
+          pathBelongsToRepository(
+            entry.path,
+            selectedRepositoryId,
+            repositories,
+          ),
+        )
+      : filteredPackages;
   const labelCounts = new Map<string, number>();
 
-  for (const entry of filteredPackages) {
+  for (const entry of repositoryScopedPackages) {
     labelCounts.set(entry.label, (labelCounts.get(entry.label) ?? 0) + 1);
   }
 
-  return [...filteredPackages]
+  return [...repositoryScopedPackages]
     .sort((left, right) =>
       compareByScopeAndLabel(left.path, right.path, left.label, right.label),
     )
@@ -144,6 +164,18 @@ export function filterRoutesForDisplay(
       return false;
     }
 
+    if (
+      options.repositories?.length &&
+      options.selectedRepositoryId &&
+      !pathBelongsToRepository(
+        route.filePath,
+        options.selectedRepositoryId,
+        options.repositories,
+      )
+    ) {
+      return false;
+    }
+
     if (!selectedPackage?.path) {
       return true;
     }
@@ -158,8 +190,20 @@ export function filterRoutesForDisplay(
 export function filterSearchResultsForDisplay(
   results: SearchResult[],
   scopeMode: ScopeMode,
+  repositories: RepositorySummary[] = [],
+  selectedRepositoryId = ".",
 ) {
-  return results.filter((item) => matchesScope(item.path, scopeMode));
+  return results.filter((item) => {
+    if (!matchesScope(item.path, scopeMode)) {
+      return false;
+    }
+
+    if (!repositories.length) {
+      return true;
+    }
+
+    return pathBelongsToRepository(item.path, selectedRepositoryId, repositories);
+  });
 }
 
 export function buildRouteInsights(

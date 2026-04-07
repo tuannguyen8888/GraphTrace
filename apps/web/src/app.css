@@ -109,6 +109,11 @@ a {
   display: grid;
   gap: 12px;
   justify-items: end;
+  width: min(340px, 100%);
+}
+
+.repo-picker {
+  width: 100%;
 }
 
 .refresh-button {

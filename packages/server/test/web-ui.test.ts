@@ -1,5 +1,11 @@
 import { describe, expect, test } from "vitest";
 
+import type { DiscoveredUnit } from "@graphtrace/shared";
+import {
+  deriveRepositories,
+  resolveRepositoryForPath,
+} from "@graphtrace/shared";
+
 import type {
   GraphItem,
   PackageSummary,
@@ -73,7 +79,84 @@ const searchResults: SearchResult[] = [
   },
 ];
 
+const units: DiscoveredUnit[] = [
+  {
+    id: "unit:root",
+    rootPath: ".",
+    displayName: "graphtrace-workspace",
+    kind: "project",
+    language: "unknown",
+    tooling: "pnpm",
+    indexingMode: "shallow",
+    confidence: 100,
+    signals: [],
+    sourceRoots: ["."],
+    pluginMatches: [],
+  },
+  {
+    id: "unit:packages/server",
+    rootPath: "packages/server",
+    displayName: "@graphtrace/server",
+    kind: "package",
+    language: "js-ts",
+    tooling: "node",
+    indexingMode: "full",
+    confidence: 100,
+    signals: [],
+    sourceRoots: ["packages/server/src"],
+    parentUnitId: "unit:root",
+    pluginMatches: [],
+  },
+  {
+    id: "unit:fixtures/express-prisma-workspace",
+    rootPath: "fixtures/express-prisma-workspace",
+    displayName: "express-prisma-workspace",
+    kind: "subproject",
+    language: "js-ts",
+    tooling: "node",
+    indexingMode: "shallow",
+    confidence: 90,
+    signals: [],
+    sourceRoots: ["fixtures/express-prisma-workspace/apps"],
+    parentUnitId: "unit:root",
+    pluginMatches: [],
+  },
+  {
+    id: "unit:fixtures/backend-frontend-workspace",
+    rootPath: "fixtures/backend-frontend-workspace",
+    displayName: "backend-frontend-workspace",
+    kind: "subproject",
+    language: "js-ts",
+    tooling: "node",
+    indexingMode: "shallow",
+    confidence: 90,
+    signals: [],
+    sourceRoots: ["fixtures/backend-frontend-workspace/backend"],
+    parentUnitId: "unit:root",
+    pluginMatches: [],
+  },
+];
+
 describe("web ui view-model", () => {
+  test("derives explicit repositories from workspace units and resolves paths against them", () => {
+    const repositories = deriveRepositories(units);
+
+    expect(repositories.map((entry) => entry.id)).toEqual([
+      ".",
+      "fixtures/backend-frontend-workspace",
+      "fixtures/express-prisma-workspace",
+    ]);
+    expect(
+      resolveRepositoryForPath("packages/server/src/index.ts", repositories)?.id,
+    ).toBe(".");
+    expect(
+      resolveRepositoryForPath(
+        "fixtures/express-prisma-workspace/apps/api/src/server.ts",
+        repositories,
+      )?.id,
+    ).toBe("fixtures/express-prisma-workspace");
+  });
+
   test("filters fixtures out of the default primary scope but keeps them for tests scope", () => {
     expect(matchesScope("packages/server/src/index.ts", "primary")).toBe(true);
     expect(
@@ -108,11 +191,16 @@ describe("web ui view-model", () => {
   });
 
   test("filters routes using package id rather than ambiguous package label", () => {
+    const repositories = deriveRepositories(units);
     const serverRoutes = filterRoutesForDisplay(routes, packages, {
+      repositories,
+      selectedRepositoryId: ".",
       scopeMode: "all",
       selectedPackageId: "package:packages/server",
     });
     const fixtureRoutes = filterRoutesForDisplay(routes, packages, {
+      repositories,
+      selectedRepositoryId: "fixtures/express-prisma-workspace",
       scopeMode: "all",
       selectedPackageId: "package:fixtures/express-prisma-workspace/apps/api",
     });
@@ -122,13 +210,21 @@ describe("web ui view-model", () => {
   });
 
   test("filters search results by scope", () => {
+    const repositories = deriveRepositories(units);
     expect(
-      filterSearchResultsForDisplay(searchResults, "primary"),
+      filterSearchResultsForDisplay(searchResults, "primary", repositories, "."),
     ).toHaveLength(1);
     expect(filterSearchResultsForDisplay(searchResults, "tests")).toHaveLength(
       1,
     );
-    expect(filterSearchResultsForDisplay(searchResults, "all")).toHaveLength(2);
+    expect(
+      filterSearchResultsForDisplay(
+        searchResults,
+        "all",
+        repositories,
+        "fixtures/express-prisma-workspace",
+      ),
+    ).toHaveLength(1);
   });
 
   test("derives route insights for related packages and query hints", () => {

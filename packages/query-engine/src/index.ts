@@ -11,8 +11,14 @@ export function createQueryEngine(store: GraphStore) {
     search(query: string, kind?: string) {
       return store.search(query, kind);
     },
+    searchByRepository(repositoryId: string, query: string, kind?: string) {
+      return store.searchByRepository(repositoryId, query, kind);
+    },
     routes(packageName?: string) {
       return store.routes(packageName);
+    },
+    routesByRepository(repositoryId: string, packageName?: string) {
+      return store.routesByRepository(repositoryId, packageName);
     },
     dependencies(
       target: string,
@@ -21,17 +27,44 @@ export function createQueryEngine(store: GraphStore) {
     ) {
       return store.fileDependencies(target, direction, depth);
     },
+    dependenciesByRepository(
+      repositoryId: string,
+      target: string,
+      direction: DependencyDirection = "both",
+      depth = 1,
+    ) {
+      return store.fileDependenciesByRepository(
+        repositoryId,
+        target,
+        direction,
+        depth,
+      );
+    },
     impact(target: string, depth = 6) {
       return store.impactFromPath(target, depth);
+    },
+    impactByRepository(repositoryId: string, target: string, depth = 6) {
+      return store.impactFromPathByRepository(repositoryId, target, depth);
     },
     flow(target: string, depth = 6) {
       return store.flowFromRoute(target, depth);
     },
+    flowByRepository(repositoryId: string, target: string, depth = 6) {
+      return store.flowFromRouteByRepository(repositoryId, target, depth);
+    },
     listPackages() {
       return store.packageOverview();
     },
+    listPackagesByRepository(repositoryId: string) {
+      return store.packageOverviewByRepository(repositoryId);
+    },
     getPackageOverview() {
       return store.packageOverview();
+    },
+    repositories() {
+      return {
+        items: store.repositories(),
+      };
     },
     getSymbolContext(query: string) {
       return store.search(query);
@@ -42,6 +75,17 @@ export function createQueryEngine(store: GraphStore) {
         dbPath,
         counts: store.stats(),
         units: store.units(),
+        lastIndexRun: store.lastIndexRun(),
+      };
+    },
+    statusByRepository(workspaceRoot: string, dbPath: string, repositoryId: string) {
+      return {
+        workspaceRoot,
+        dbPath,
+        counts: store.statsByRepository(repositoryId),
+        units: store.units(),
+        repositories: store.repositories(),
+        selectedRepositoryId: repositoryId,
         lastIndexRun: store.lastIndexRun(),
       };
     },

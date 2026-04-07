@@ -6,10 +6,16 @@ import type {
   DependencyDirection,
   DiscoveredUnit,
   GraphItem,
+  IndexSummary,
   IndexRunInfo,
   QueryResult,
+  RepositorySummary,
   RouteItem,
   SearchItem,
+} from "@graphtrace/shared";
+import {
+  deriveRepositories,
+  pathBelongsToRepository,
 } from "@graphtrace/shared";
 
 const SCHEMA_VERSION = 3;
@@ -452,6 +458,19 @@ export class GraphStore {
     };
   }
 
+  searchByRepository(
+    repositoryId: string,
+    query: string,
+    kind?: string,
+  ): QueryResult<SearchItem> {
+    const repositories = this.repositories();
+    return {
+      items: this.search(query, kind).items.filter((item) =>
+        pathBelongsToRepository(item.path, repositoryId, repositories),
+      ),
+    };
+  }
+
   routes(packageName?: string): QueryResult<RouteItem> {
     const rows = this.db
       .prepare("SELECT * FROM routes ORDER BY method, path")
@@ -472,6 +491,18 @@ export class GraphStore {
           ? item.filePath === matchingPackage.root_path ||
             item.filePath.startsWith(`${matchingPackage.root_path}/`)
           : false,
+      ),
+    };
+  }
+
+  routesByRepository(
+    repositoryId: string,
+    packageName?: string,
+  ): QueryResult<RouteItem> {
+    const repositories = this.repositories();
+    return {
+      items: this.routes(packageName).items.filter((item) =>
+        pathBelongsToRepository(item.filePath, repositoryId, repositories),
       ),
     };
   }
@@ -573,6 +604,18 @@ export class GraphStore {
     return { items: [...items.values()] };
   }
 
+  fileDependenciesByRepository(
+    repositoryId: string,
+    targetPath: string,
+    direction: DependencyDirection = "both",
+    maxDepth = 1,
+  ): QueryResult<GraphItem> {
+    return this.filterGraphItemsByRepository(
+      repositoryId,
+      this.fileDependencies(targetPath, direction, maxDepth),
+    );
+  }
+
   impactFromPath(targetPath: string, maxDepth = 6): QueryResult<GraphItem> {
     const startId = `file:${targetPath}`;
     const edges = this.db
@@ -628,6 +671,17 @@ export class GraphStore {
     }
 
     return { items };
+  }
+
+  impactFromPathByRepository(
+    repositoryId: string,
+    targetPath: string,
+    maxDepth = 6,
+  ): QueryResult<GraphItem> {
+    return this.filterGraphItemsByRepository(
+      repositoryId,
+      this.impactFromPath(targetPath, maxDepth),
+    );
   }
 
   flowFromRoute(routeId: string, maxDepth = 6): QueryResult<GraphItem> {
@@ -712,6 +766,17 @@ export class GraphStore {
     return { items };
   }
 
+  flowFromRouteByRepository(
+    repositoryId: string,
+    routeId: string,
+    maxDepth = 6,
+  ): QueryResult<GraphItem> {
+    return this.filterGraphItemsByRepository(
+      repositoryId,
+      this.flowFromRoute(routeId, maxDepth),
+    );
+  }
+
   packageOverview(): QueryResult<GraphItem> {
     const rows = this.db
       .prepare("SELECT id, name, root_path FROM packages ORDER BY name")
@@ -728,6 +793,19 @@ export class GraphStore {
         path: row.root_path,
       })),
     };
+  }
+
+  packageOverviewByRepository(repositoryId: string): QueryResult<GraphItem> {
+    const repositories = this.repositories();
+    return {
+      items: this.packageOverview().items.filter((item) =>
+        pathBelongsToRepository(item.path, repositoryId, repositories),
+      ),
+    };
+  }
+
+  repositories(): RepositorySummary[] {
+    return deriveRepositories(this.units());
   }
 
   listIndexedFilePaths(): string[] {
@@ -749,13 +827,7 @@ export class GraphStore {
     };
   }
 
-  stats(): {
-    packageCount: number;
-    fileCount: number;
-    symbolCount: number;
-    routeCount: number;
-    queryEdgeCount: number;
-  } {
+  stats(): IndexSummary {
     const getCount = (table: string, clause = "") =>
       Number(
         (
@@ -771,6 +843,64 @@ export class GraphStore {
       symbolCount: getCount("symbols"),
       routeCount: getCount("routes"),
       queryEdgeCount: getCount("edges", " WHERE type = 'queries'"),
+    };
+  }
+
+  statsByRepository(repositoryId: string): IndexSummary {
+    const repositories = this.repositories();
+    const packageCount = this.packageOverviewByRepository(repositoryId).items
+      .length;
+    const routeCount = this.routesByRepository(repositoryId).items.length;
+    const fileRows = this.db
+      .prepare("SELECT path FROM files ORDER BY path")
+      .all() as Array<{ path: string }>;
+    const fileCount = fileRows.filter((row) =>
+      pathBelongsToRepository(row.path, repositoryId, repositories),
+    ).length;
+    const symbolRows = this.db
+      .prepare(
+        `SELECT files.path AS file_path
+         FROM symbols
+         INNER JOIN files ON files.id = symbols.file_id`,
+      )
+      .all() as Array<{ file_path: string }>;
+    const symbolCount = symbolRows.filter((row) =>
+      pathBelongsToRepository(row.file_path, repositoryId, repositories),
+    ).length;
+    const queryRows = this.db
+      .prepare(
+        "SELECT source_id, metadata_json FROM edges WHERE type = 'queries'",
+      )
+      .all() as Array<{ source_id: string; metadata_json: string | null }>;
+    const queryEdgeCount = queryRows.filter((row) => {
+      const metadata = row.metadata_json ? JSON.parse(row.metadata_json) : {};
+      const path =
+        typeof metadata.filePath === "string"
+          ? metadata.filePath
+          : row.source_id.startsWith("file:")
+            ? row.source_id.slice("file:".length)
+            : undefined;
+      return pathBelongsToRepository(path, repositoryId, repositories);
+    }).length;
+
+    return {
+      packageCount,
+      fileCount,
+      symbolCount,
+      routeCount,
+      queryEdgeCount,
+    };
+  }
+
+  private filterGraphItemsByRepository(
+    repositoryId: string,
+    result: QueryResult<GraphItem>,
+  ): QueryResult<GraphItem> {
+    const repositories = this.repositories();
+    return {
+      items: result.items.filter((item) =>
+        pathBelongsToRepository(item.path, repositoryId, repositories),
+      ),
     };
   }
 
