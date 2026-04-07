@@ -275,6 +275,119 @@ a {
   margin-bottom: 18px;
 }
 
+.graph-panel {
+  overflow: hidden;
+}
+
+.graph-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.graph-filter {
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+  color: #c9d5e5;
+}
+
+.graph-filter.is-active {
+  border-color: rgba(246, 180, 73, 0.34);
+  color: #f7fbff;
+  background: rgba(246, 180, 73, 0.1);
+}
+
+.graph-canvas {
+  min-height: 420px;
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: radial-gradient(
+      circle at top,
+      rgba(87, 146, 255, 0.08),
+      transparent 28%
+    ),
+    rgba(4, 10, 19, 0.88);
+  overflow: auto;
+}
+
+.graph-svg {
+  width: 100%;
+  min-width: 960px;
+  height: 520px;
+  display: block;
+}
+
+.graph-edge {
+  fill: none;
+  stroke-width: 2.4;
+  opacity: 0.85;
+}
+
+.edge-flow {
+  stroke: rgba(99, 187, 255, 0.78);
+}
+
+.edge-depends {
+  stroke: rgba(246, 180, 73, 0.75);
+}
+
+.edge-impacts {
+  stroke: rgba(255, 129, 102, 0.78);
+}
+
+.edge-contains {
+  stroke: rgba(151, 205, 142, 0.72);
+  stroke-dasharray: 7 6;
+}
+
+.graph-node {
+  cursor: pointer;
+}
+
+.graph-node rect {
+  fill: rgba(9, 19, 34, 0.95);
+  stroke: rgba(255, 255, 255, 0.09);
+  stroke-width: 1.4;
+  transition: stroke 140ms ease, transform 140ms ease, fill 140ms ease;
+}
+
+.graph-node:hover rect,
+.graph-node.is-focus rect {
+  stroke: rgba(246, 180, 73, 0.42);
+}
+
+.graph-node.is-focus rect {
+  fill: rgba(18, 31, 52, 0.96);
+}
+
+.graph-node-kind,
+.graph-node-label,
+.graph-node-path {
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+  pointer-events: none;
+}
+
+.graph-node-kind {
+  fill: #f6b449;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.graph-node-label {
+  fill: #f7fbff;
+  font-size: 14px;
+}
+
+.graph-node-path {
+  fill: #9fb0c8;
+  font-size: 11px;
+}
+
 .stack-list {
   list-style: none;
   padding: 0;
@@ -469,6 +582,10 @@ a {
 .inspector-empty {
   min-height: 160px;
   align-content: center;
+}
+
+.graph-empty {
+  min-height: 280px;
 }
 
 .empty-state,
