@@ -1,4 +1,11 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -9,6 +16,7 @@ import { createGraphTraceApp } from "../src/index";
 
 const fixtureRoot = join(process.cwd(), "fixtures", "express-prisma-workspace");
 const selfHostRoot = process.cwd();
+const builtWebRoot = join(process.cwd(), "apps", "web", "dist");
 
 describe("workspace api", () => {
   test("loads two workspaces through one daemon and keeps query results isolated", async () => {
@@ -166,6 +174,71 @@ describe("workspace api", () => {
       expect(afterRemoval.json().items).toEqual([]);
     } finally {
       await app.close();
+      daemon.close();
+    }
+  });
+
+  test("serves the SPA shell for workspace detail deep links", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "graphtrace-daemon-"));
+    const daemon = createGraphTraceDaemon({ homeDir });
+    const workspace = await daemon.addWorkspace(selfHostRoot, {
+      label: "GraphTrace",
+    });
+    const backupRoot = await mkdtemp(join(tmpdir(), "graphtrace-web-dist-"));
+    const backupDistRoot = join(backupRoot, "dist");
+    let hadExistingDist = false;
+
+    try {
+      await access(builtWebRoot);
+      hadExistingDist = true;
+      await rename(builtWebRoot, backupDistRoot);
+    } catch {
+      hadExistingDist = false;
+    }
+
+    await mkdir(join(builtWebRoot, "assets"), { recursive: true });
+    await writeFile(
+      join(builtWebRoot, "index.html"),
+      [
+        "<!doctype html>",
+        '<html lang="en">',
+        "  <head>",
+        '    <meta charset="UTF-8" />',
+        '    <script type="module" src="/assets/test-entry.js"></script>',
+        "  </head>",
+        "  <body>",
+        '    <div id="root"></div>',
+        "  </body>",
+        "</html>",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(
+      join(builtWebRoot, "assets", "test-entry.js"),
+      'console.log("GraphTrace test asset");\n',
+      "utf8",
+    );
+
+    const app = createGraphTraceApp({ daemon });
+
+    try {
+      const response = await app.inject({
+        method: "GET",
+        url: `/workspaces/${workspace.id}?repository=${encodeURIComponent("packages/server")}`,
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers["content-type"]).toContain("text/html");
+      expect(response.body).toContain('<div id="root"></div>');
+    } finally {
+      await app.close();
+      await rm(builtWebRoot, { recursive: true, force: true });
+      if (hadExistingDist) {
+        await mkdir(join(builtWebRoot, ".."), { recursive: true });
+        await rename(backupDistRoot, builtWebRoot);
+      }
+      await rm(backupRoot, { recursive: true, force: true });
       daemon.close();
     }
   });

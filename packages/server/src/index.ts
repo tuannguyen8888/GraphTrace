@@ -107,8 +107,44 @@ export function createGraphTraceApp(
     reply.header("content-type", html.contentType);
     return html.body;
   });
+  app.setNotFoundHandler(async (request, reply) => {
+    if (!shouldServeSpaShell(request.url)) {
+      reply.code(404);
+      return {
+        message: `Route ${request.method}:${request.url} not found`,
+        error: "Not Found",
+        statusCode: 404,
+      };
+    }
+
+    const html = await readBuiltWebFile(["index.html"]);
+
+    if (!html || typeof html.body !== "string") {
+      reply.code(503);
+      reply.header("content-type", "text/plain; charset=utf-8");
+      return "GraphTrace web assets are missing. Run `pnpm web:build` before starting the web server.";
+    }
+
+    reply.header("content-type", html.contentType);
+    return html.body;
+  });
 
   return app;
+}
+
+function shouldServeSpaShell(url: string): boolean {
+  const pathname = url.split("?", 1)[0] || "/";
+
+  if (
+    pathname === "/" ||
+    pathname === "/health" ||
+    pathname.startsWith("/api") ||
+    pathname.startsWith("/assets/")
+  ) {
+    return false;
+  }
+
+  return extname(pathname) === "";
 }
 
 export async function startGraphTraceServer(
