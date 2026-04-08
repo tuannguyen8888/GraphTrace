@@ -21,6 +21,8 @@ export interface GraphTraceDaemon {
   ): Promise<WorkspaceRecord>;
   listWorkspaces(): WorkspaceRecord[];
   getWorkspace(workspaceId: string): WorkspaceRecord | null;
+  removeWorkspace(workspaceId: string): void;
+  reindexWorkspace(workspaceId: string): Promise<WorkspaceRecord>;
   status(
     workspaceId: string,
     repositoryId?: string,
@@ -93,6 +95,20 @@ class DefaultGraphTraceDaemon implements GraphTraceDaemon {
 
   getWorkspace(workspaceId: string): WorkspaceRecord | null {
     return this.registry.getWorkspace(workspaceId);
+  }
+
+  removeWorkspace(workspaceId: string): void {
+    this.registry.removeWorkspace(workspaceId);
+  }
+
+  async reindexWorkspace(workspaceId: string): Promise<WorkspaceRecord> {
+    const workspace = this.requireWorkspace(workspaceId);
+    await this.addWorkspace(workspace.canonicalRootPath, {
+      label: workspace.label,
+      notes: workspace.notes ?? undefined,
+      pinned: workspace.pinned,
+    });
+    return this.requireWorkspace(workspaceId);
   }
 
   status(workspaceId: string, repositoryId?: string) {

@@ -115,10 +115,9 @@ export async function startGraphTraceServer(
   options: StartGraphTraceServerOptions,
 ): Promise<GraphTraceServer> {
   const app = createGraphTraceApp(options);
-
-  await app.listen({ host: "127.0.0.1", port: options.port });
+  const address = await app.listen({ host: "127.0.0.1", port: options.port });
   return {
-    address: `http://127.0.0.1:${options.port}`,
+    address,
     close: async () => {
       await app.close();
     },

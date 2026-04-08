@@ -1,7 +1,8 @@
 import { spawnSync } from "node:child_process";
 import type { Dirent } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 
 import {
   defaultGraphTraceConfig,
@@ -14,7 +15,10 @@ import {
   runWorkspaceIndex,
   withWorkspaceQueryEngine,
 } from "@graphtrace/query-engine";
-import { startGraphTraceServer } from "@graphtrace/server";
+import {
+  createGraphTraceDaemon,
+  startGraphTraceServer,
+} from "@graphtrace/server";
 import type {
   CliRunOptions,
   CliRunResult,
@@ -22,6 +26,7 @@ import type {
   GraphTraceStatus,
   IndexWorkspaceResult,
 } from "@graphtrace/shared";
+import type { WorkspaceRecord } from "@graphtrace/storage";
 
 import { type SupportedAgentTool, planAgentBootstrap } from "./agent/bootstrap";
 import {
@@ -241,15 +246,139 @@ export async function runCli(
       };
     }
     case "web": {
-      const portFlagIndex = args.indexOf("--port");
-      const port = portFlagIndex >= 0 ? Number(args[portFlagIndex + 1]) : 4310;
+      const port = readPortOption(args, "--port") ?? 4310;
       const server = await startGraphTraceServer({ workspaceRoot: cwd, port });
       return {
         exitCode: 0,
         stdout: `web:${server.address}`,
         stderr: "",
         keepAlive: true,
+        cleanup: async () => {
+          await server.close();
+        },
       };
+    }
+    case "serve": {
+      const daemon = createGraphTraceDaemon({
+        homeDir: readHomeOption(args),
+      });
+      const port = readPortOption(args, "--port") ?? 4310;
+      const server = await startGraphTraceServer({ daemon, port });
+      return {
+        exitCode: 0,
+        stdout: `serve:${server.address}`,
+        stderr: "",
+        keepAlive: true,
+        cleanup: async () => {
+          await server.close();
+          daemon.close();
+        },
+      };
+    }
+    case "workspace": {
+      const [subcommand, ...workspaceArgs] = args;
+      const daemon = createGraphTraceDaemon({
+        homeDir: readHomeOption(workspaceArgs),
+      });
+
+      try {
+        switch (subcommand) {
+          case "add": {
+            const rawRoot = workspaceArgs[0];
+            if (!rawRoot) {
+              return {
+                exitCode: 1,
+                stdout: "",
+                stderr: "workspace add requires a root path",
+              };
+            }
+
+            const workspace = await daemon.addWorkspace(
+              resolveWorkspaceArg(cwd, rawRoot),
+              {
+                label: readOption(workspaceArgs, "--label"),
+              },
+            );
+            return {
+              exitCode: 0,
+              stdout: workspaceArgs.includes("--json")
+                ? JSON.stringify(workspace, null, 2)
+                : formatWorkspaceRecord(workspace),
+              stderr: "",
+            };
+          }
+          case "list": {
+            const items = daemon.listWorkspaces();
+            return {
+              exitCode: 0,
+              stdout: workspaceArgs.includes("--json")
+                ? JSON.stringify({ items }, null, 2)
+                : formatWorkspaceList(items),
+              stderr: "",
+            };
+          }
+          case "remove": {
+            const workspaceId = workspaceArgs[0];
+            if (!workspaceId) {
+              return {
+                exitCode: 1,
+                stdout: "",
+                stderr: "workspace remove requires a workspace id",
+              };
+            }
+
+            daemon.removeWorkspace(workspaceId);
+            return {
+              exitCode: 0,
+              stdout: `removed:${workspaceId}`,
+              stderr: "",
+            };
+          }
+          case "reindex": {
+            const workspaceId = workspaceArgs[0];
+            if (!workspaceId) {
+              return {
+                exitCode: 1,
+                stdout: "",
+                stderr: "workspace reindex requires a workspace id",
+              };
+            }
+
+            const workspace = await daemon.reindexWorkspace(workspaceId);
+            const status = daemon.status(workspaceId);
+            return {
+              exitCode: 0,
+              stdout: workspaceArgs.includes("--json")
+                ? JSON.stringify(
+                    {
+                      workspace,
+                      summary: status.counts,
+                    },
+                    null,
+                    2,
+                  )
+                : [
+                    "workspace reindexed",
+                    formatWorkspaceRecord(workspace),
+                    `packages:${status.counts.packageCount}`,
+                    `files:${status.counts.fileCount}`,
+                    `symbols:${status.counts.symbolCount}`,
+                    `routes:${status.counts.routeCount}`,
+                    `query_edges:${status.counts.queryEdgeCount}`,
+                  ].join("\n"),
+              stderr: "",
+            };
+          }
+          default:
+            return {
+              exitCode: 1,
+              stdout: "",
+              stderr: `unknown workspace command: ${subcommand ?? "<none>"}`,
+            };
+        }
+      } finally {
+        daemon.close();
+      }
     }
     case "mcp": {
       await createGraphTraceMcpServer({ workspaceRoot: cwd });
@@ -416,6 +545,30 @@ function formatWatchCycle(
   ].join("\n");
 }
 
+function formatWorkspaceRecord(workspace: WorkspaceRecord): string {
+  return [
+    `workspace:${workspace.id}`,
+    `label:${workspace.label}`,
+    `root:${workspace.canonicalRootPath}`,
+    `status:${workspace.status}`,
+    `db:${workspace.dbPath}`,
+  ].join("\n");
+}
+
+function formatWorkspaceList(workspaces: WorkspaceRecord[]): string {
+  if (workspaces.length === 0) {
+    return "workspaces:0";
+  }
+
+  return [
+    `workspaces:${workspaces.length}`,
+    ...workspaces.map(
+      (workspace) =>
+        `${workspace.id}\t${workspace.label}\t${workspace.status}\t${workspace.canonicalRootPath}`,
+    ),
+  ].join("\n");
+}
+
 async function collectWorkspaceSnapshot(workspaceRoot: string) {
   const snapshot = new Map<string, string>();
   const config = await loadRuntimeConfig(workspaceRoot);
@@ -513,6 +666,14 @@ function readOption(argv: string[], name: string): string | undefined {
   return argv[index + 1];
 }
 
+function readHomeOption(argv: string[]): string {
+  return readOption(argv, "--home") ?? homedir();
+}
+
+function resolveWorkspaceArg(cwd: string, value: string): string {
+  return resolve(cwd, value);
+}
+
 function readNumberOption(argv: string[], name: string): number | undefined {
   const raw = readOption(argv, name);
   if (!raw) {
@@ -521,6 +682,16 @@ function readNumberOption(argv: string[], name: string): number | undefined {
 
   const value = Number(raw);
   return Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function readPortOption(argv: string[], name: string): number | undefined {
+  const raw = readOption(argv, name);
+  if (!raw) {
+    return undefined;
+  }
+
+  const value = Number(raw);
+  return Number.isInteger(value) && value >= 0 ? value : undefined;
 }
 
 function readDirectionOption(
