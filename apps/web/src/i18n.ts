@@ -25,6 +25,8 @@ const enMessages = {
     copyPath: "Copy path",
     copyCommand: "Copy command",
     openFile: "Open file",
+    open: "Open",
+    focus: "Focus",
   },
   status: {
     ready: "Ready",
@@ -140,7 +142,25 @@ const enMessages = {
     inspectorDescription:
       "Select a route, file, dependency, impact item, or query hint to keep drilling down.",
     inspectorEmpty:
-      "Select a route or search result to inspect flow, dependencies, impact, and quick actions.",
+      "Select a route, file, or search result to inspect flow, dependencies, impact, and quick actions.",
+    starterGuideKicker: "Quick start",
+    starterGuideTitle: "Recommended entrypoints",
+    starterGuideDescription:
+      "Open one of these likely entrypoints to populate the inspector and graph without guessing the first symbol.",
+    starterGuideEmpty:
+      "No clear starter action is available in the current scope yet. Try widening repository scope or refreshing the graph.",
+    starterRouteActionLabel: (params: { routeId: string }) =>
+      `Inspect route ${params.routeId}`,
+    starterRouteActionReason:
+      "Load route flow, related packages, and query hints from a concrete HTTP entrypoint.",
+    starterFileActionLabel: (params: { filePath: string }) =>
+      `Inspect file ${params.filePath}`,
+    starterFileActionReason:
+      "Load dependencies and impact from a concrete source file instead of an empty inspector.",
+    starterPackageActionLabel: (params: { packageLabel: string }) =>
+      `Focus package ${params.packageLabel}`,
+    starterPackageActionReason:
+      "Narrow the triage lens before drilling into a specific file or route.",
     rerunSearch: "Re-run search",
     inspectorLoading: "Loading inspector data...",
     routeFlowTitle: "Route flow",
@@ -228,9 +248,11 @@ const viMessages: typeof enMessages = {
     repoScopeLabel: "repo",
     testScopeLabel: "test",
     fixtureScopeLabel: "fixture",
-    copyPath: "Copy path",
-    copyCommand: "Copy command",
+    copyPath: "Sao chép đường dẫn",
+    copyCommand: "Sao chép lệnh",
     openFile: "Mở file",
+    open: "Mở",
+    focus: "Tập trung",
   },
   status: {
     ready: "Sẵn sàng",
@@ -288,96 +310,114 @@ const viMessages: typeof enMessages = {
     },
   },
   app: {
-    workspaceListLabel: "Workspaces",
+    workspaceListLabel: "Workspace",
     eyebrow: "ĐỒ THỊ CODE LOCAL-FIRST",
     intro:
-      "Search code, inspect routes và tiếp tục đào sâu từ file, dependency, impact và flow mà chưa phải nhảy sang repo-wide scan quá sớm.",
-    backToWorkspaces: "Quay lại danh sách workspace",
+      "Tìm trong code, xem route và tiếp tục đào sâu từ file, phụ thuộc, tác động và luồng xử lý mà chưa phải nhảy sang truy vấn toàn repo quá sớm.",
+    backToWorkspaces: "Quay lại workspace",
     repositoryScope: "Phạm vi repository",
-    refreshGraph: "Làm mới graph",
+    refreshGraph: "Làm mới đồ thị",
     workspaceLabel: "Workspace",
     lastIndexLabel: "Lần index gần nhất",
     workspaceStatusKicker: "Trạng thái workspace",
-    graphStateTitle: "Trạng thái graph",
-    packagesLabel: "Packages",
-    filesLabel: "Files",
-    symbolsLabel: "Symbols",
-    routesLabel: "Routes",
-    queryEdgesLabel: "Query edges",
+    graphStateTitle: "Trạng thái đồ thị",
+    packagesLabel: "Gói",
+    filesLabel: "File",
+    symbolsLabel: "Ký hiệu",
+    routesLabel: "Route",
+    queryEdgesLabel: "Cạnh truy vấn",
     repositoryLabel: "Repository",
     repositoryRootLabel: "Gốc repository",
     workspaceRootLabel: "Gốc workspace",
     dbPathLabel: "Đường dẫn DB",
-    modeLabel: "Mode",
+    modeLabel: "Chế độ",
     workspaceScopeKicker: "Phạm vi workspace",
-    triageLensTitle: "Lăng kính triage",
-    packagesKicker: "Packages",
+    triageLensTitle: "Lăng kính rà soát",
+    packagesKicker: "Gói",
     routeFilterTitle: "Bộ lọc route",
     filterByPackageLabel: "Lọc theo package",
     allVisiblePackages: "Tất cả package đang thấy",
-    duplicateLabelHint: "Trùng label nên dùng path để phân biệt.",
+    duplicateLabelHint: "Tên bị trùng nên dùng path để phân biệt.",
     architectureGraphKicker: "Đồ thị kiến trúc",
     boundedRelationshipTitle: "Quan hệ lân cận có giới hạn",
     architectureGraphDescription:
-      "Graph chỉ hiển thị neighborhood quanh selection hiện tại để giảm noise trên self-host repository.",
-    graphEdgeFlow: "Flow",
-    graphEdgeDepends: "Dependencies",
-    graphEdgeImpacts: "Impact",
-    graphEdgeContains: "Contains",
-    searchResultsKicker: "Kết quả search",
-    workbenchTitle: "Workbench symbol và file",
+      "Đồ thị chỉ hiển thị vùng lân cận quanh vùng chọn hiện tại để giảm nhiễu trên repository tự self-host.",
+    graphEdgeFlow: "Luồng",
+    graphEdgeDepends: "Phụ thuộc",
+    graphEdgeImpacts: "Tác động",
+    graphEdgeContains: "Bao gồm",
+    searchResultsKicker: "Kết quả tìm kiếm",
+    workbenchTitle: "Bàn làm việc symbol và file",
     workbenchDescription:
       "Tập trung vào repo chính trước, rồi mới mở rộng sang fixtures khi cần đối chiếu.",
     queryLabel: "Truy vấn",
     kindLabel: "Loại",
     guidedTriageKicker: "Triage có hướng dẫn",
     noSearchMatches: (params: { searchKind: string; searchText: string }) =>
-      `Chưa thấy ${params.searchKind} nào khớp với "${params.searchText}" trong scope hiện tại. Thử quick pick phía trên hoặc đổi kind search.`,
+      `Chưa thấy ${params.searchKind} nào khớp với "${params.searchText}" trong phạm vi hiện tại. Thử gợi ý nhanh phía trên hoặc đổi loại tìm kiếm.`,
     idleSearchPrompt:
-      "Chọn quick pick phía trên hoặc gõ query để xem symbol, route, file hoặc package khớp với scope hiện tại.",
+      "Chọn gợi ý nhanh phía trên hoặc gõ truy vấn để xem symbol, route, file hoặc package khớp với phạm vi hiện tại.",
     routeExplorerKicker: "Khám phá route",
     httpSurfaceTitle: "Bề mặt HTTP",
     routeExplorerDescription:
-      "Danh sách route được lọc theo scope và package đang chọn, không còn phụ thuộc vào package label mơ hồ.",
+      "Danh sách route được lọc theo phạm vi và package đang chọn, không còn phụ thuộc vào package label mơ hồ.",
     noRoutesInScope: "Không có route nào trong scope hoặc package hiện tại.",
     unmappedPackage: "chưa map package",
     detailPaneKicker: "Khung chi tiết",
     inspectorTitle: "Inspector",
     inspectorDescription:
-      "Chọn route, file, dependency, impact item hoặc query hint để tiếp tục drill-down.",
+      "Chọn route, file, mục phụ thuộc, mục tác động hoặc gợi ý truy vấn để tiếp tục đào sâu.",
     inspectorEmpty:
-      "Chọn một route hoặc search result để xem flow, dependencies, impact và quick actions.",
-    rerunSearch: "Chạy lại search",
+      "Chọn một route, file hoặc kết quả tìm kiếm để xem luồng, phụ thuộc, tác động và các thao tác nhanh.",
+    starterGuideKicker: "Bắt đầu nhanh",
+    starterGuideTitle: "Điểm bắt đầu đề xuất",
+    starterGuideDescription:
+      "Mở một entrypoint khả dĩ bên dưới để điền dữ liệu cho inspector và đồ thị thay vì phải đoán symbol đầu tiên.",
+    starterGuideEmpty:
+      "Chưa có hành động khởi đầu rõ ràng trong phạm vi hiện tại. Thử nới rộng repository scope hoặc làm mới đồ thị.",
+    starterRouteActionLabel: (params: { routeId: string }) =>
+      `Mở route ${params.routeId}`,
+    starterRouteActionReason:
+      "Tải luồng route, package liên quan và gợi ý truy vấn từ một điểm vào HTTP cụ thể.",
+    starterFileActionLabel: (params: { filePath: string }) =>
+      `Mở file ${params.filePath}`,
+    starterFileActionReason:
+      "Tải phụ thuộc và tác động từ một file nguồn cụ thể thay vì để inspector trống.",
+    starterPackageActionLabel: (params: { packageLabel: string }) =>
+      `Tập trung vào package ${params.packageLabel}`,
+    starterPackageActionReason:
+      "Thu hẹp vùng triage trước khi đi sâu vào một file hoặc route cụ thể.",
+    rerunSearch: "Chạy lại tìm kiếm",
     inspectorLoading: "Đang tải dữ liệu inspector...",
     routeFlowTitle: "Luồng route",
     routeFlowSubtitle:
-      "Click vào từng file, package hoặc query hint để tiếp tục trace.",
-    relatedPackagesTitle: "Packages liên quan",
+      "Bấm vào từng file, package hoặc gợi ý truy vấn để tiếp tục lần theo dấu vết.",
+    relatedPackagesTitle: "Package liên quan",
     relatedPackagesSubtitle:
-      "Packages liên quan trực tiếp tới các file trong route flow.",
-    queryHintsTitle: "Gợi ý query",
+      "Các package nối trực tiếp với những file trong luồng route.",
+    queryHintsTitle: "Gợi ý truy vấn",
     queryHintsSubtitle:
-      "Các query heuristics GraphTrace tìm thấy dọc route flow.",
-    dependenciesTitle: "Dependencies",
+      "Các manh mối truy vấn GraphTrace suy ra dọc theo luồng route.",
+    dependenciesTitle: "Phụ thuộc",
     dependenciesSubtitle: "Các điểm vào và ra trong bán kính 2 bước.",
-    impactTitle: "Impact",
+    impactTitle: "Tác động",
     impactSubtitle: "Những file và route dễ bị ảnh hưởng nếu chỉnh file này.",
     noItemsInTrace: "Không có item nào trong vùng trace này.",
-    copiedPath: "Đã copy file path.",
-    copiedCommand: "Đã copy GraphTrace command.",
-    clipboardUnavailable: "Clipboard API không khả dụng trong browser này.",
+    copiedPath: "Đã sao chép đường dẫn file.",
+    copiedCommand: "Đã sao chép lệnh GraphTrace.",
+    clipboardUnavailable: "Clipboard API không khả dụng trong trình duyệt này.",
     loadWorkspacesError: "Không tải được danh sách workspace.",
     loadWorkspaceStateError: "Không tải được trạng thái workspace.",
     loadInspectorError: "Không tải được inspector.",
     addWorkspaceError: "Không thêm được workspace mới.",
-    noFilePathToTrace: "Không có file path để trace.",
-    confidence: (params: { value: number }) => `${params.value}% confidence`,
+    noFilePathToTrace: "Không có đường dẫn file để lần theo.",
+    confidence: (params: { value: number }) => `độ tin cậy ${params.value}%`,
   },
   graph: {
     emptyState:
-      "Chọn route, file hoặc package trong inspector để xem bounded architecture graph quanh selection đó.",
-    searchLabel: "Tìm trong graph",
-    searchPlaceholder: "route id, package, file path, query hint...",
+      "Chọn route, file hoặc package trong inspector để xem đồ thị kiến trúc giới hạn quanh vùng chọn đó.",
+    searchLabel: "Tìm trong đồ thị",
+    searchPlaceholder: "mã route, package, đường dẫn file, gợi ý truy vấn...",
     resetView: "Đặt lại góc nhìn",
     fullscreen: "Toàn màn hình",
     exitFullscreen: "Thoát toàn màn hình",
@@ -388,9 +428,9 @@ const viMessages: typeof enMessages = {
   searchWorkbench: {
     mainRepoLabel: "repo chính",
     startFromContext: (params: { contextLabel: string }) =>
-      `Bắt đầu triage từ ${params.contextLabel}`,
+      `Bắt đầu rà soát từ ${params.contextLabel}`,
     intro:
-      "Chọn một quick pick bên dưới để bắt đầu từ route, package hoặc file thay vì đoán symbol ngẫu nhiên.",
+      "Chọn một gợi ý nhanh bên dưới để bắt đầu từ route, package hoặc file thay vì đoán symbol ngẫu nhiên.",
     routeQuickPickLabel: (params: { routeId: string }) =>
       `Bắt đầu từ route ${params.routeId}`,
     routeQuickPickReason:
@@ -402,19 +442,19 @@ const viMessages: typeof enMessages = {
     fileQuickPickLabel: (params: { filePath: string }) =>
       `Mở file ${params.filePath}`,
     fileQuickPickReason:
-      "File search hợp khi cần mở đúng entrypoint hoặc handler path.",
+      "Tìm theo file hợp khi cần mở đúng entrypoint hoặc handler path.",
     step1: (params: { contextLabel: string }) =>
-      `1. Đi từ route để thấy flow và query hints trong ${params.contextLabel}.`,
-    step2: "2. Khoanh vùng package liên quan để cắt bớt noise.",
-    step3: "3. Mở file hoặc dependency trace khi đã có entrypoint đủ rõ.",
+      `1. Đi từ route để thấy luồng và gợi ý truy vấn trong ${params.contextLabel}.`,
+    step2: "2. Khoanh vùng package liên quan để cắt bớt nhiễu.",
+    step3: "3. Mở file hoặc lần theo phụ thuộc khi đã có entrypoint đủ rõ.",
     searchKindGuide: {
       route:
-        "Route search hợp với HTTP ids như GET /api/impact hoặc path fragments của endpoint.",
-      file: "File search hợp với path fragments như packages/server/src/index.ts hoặc watch.test.ts.",
+        "Tìm route hợp với HTTP id như GET /api/impact hoặc các đoạn path của endpoint.",
+      file: "Tìm file hợp với các đoạn path như packages/server/src/index.ts hoặc watch.test.ts.",
       package:
-        "Package search hợp với package name hoặc root path khi cần khoanh vùng một khu vực code.",
+        "Tìm package hợp với tên package hoặc root path khi cần khoanh vùng một khu vực code.",
       symbol:
-        "Symbol search hợp khi đã biết function, class, export hoặc token code cụ thể.",
+        "Tìm symbol hợp khi đã biết function, class, export hoặc token code cụ thể.",
     },
   },
 };

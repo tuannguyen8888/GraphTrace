@@ -41,6 +41,7 @@ import {
   resolveLocale,
 } from "./i18n";
 import { buildRouteHref, parseRouteState } from "./route-state";
+import { StarterGuide } from "./starter-guide";
 import {
   type GraphItem,
   type PackageListEntry,
@@ -49,11 +50,13 @@ import {
   type RouteSummary,
   type ScopeMode,
   type SearchResult,
+  type WorkspaceStarterAction,
   type WorkspaceStatus,
   buildGraphTraceCommand,
   buildPackageEntries,
   buildRouteInsights,
   buildSearchWorkbenchGuidance,
+  buildWorkspaceStarterGuide,
   filterRoutesForDisplay,
   filterSearchResultsForDisplay,
   findOwningPackage,
@@ -166,6 +169,15 @@ export function App() {
     scopeMode,
     selectedPackageId,
     searchKind,
+  });
+  const starterGuide = buildWorkspaceStarterGuide({
+    locale,
+    packages,
+    routes,
+    repositories,
+    selectedRepositoryId,
+    scopeMode,
+    selectedPackageId,
   });
   const architectureGraph = buildArchitectureGraph({
     inspector,
@@ -522,6 +534,14 @@ export function App() {
     }
 
     window.localStorage.setItem(LOCALE_STORAGE_KEY, locale);
+  }, [locale]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    document.documentElement.lang = locale;
   }, [locale]);
 
   const handleAddWorkspace = async (event: FormEvent<HTMLFormElement>) => {
@@ -891,6 +911,7 @@ export function App() {
                 locale={locale}
                 graph={architectureGraph}
                 nodes={positionedGraphNodes}
+                starterGuide={starterGuide}
                 onSelectNode={(node) =>
                   inspectGraphItem(
                     {
@@ -899,6 +920,17 @@ export function App() {
                       label: node.label,
                       path: node.path,
                     },
+                    packages,
+                    routes,
+                    setInspector,
+                    setSelectedPackageId,
+                    setSearchKind,
+                    setSearchText,
+                  )
+                }
+                onRunStarterAction={(action) =>
+                  runStarterAction(
+                    action,
                     packages,
                     routes,
                     setInspector,
@@ -1103,8 +1135,23 @@ export function App() {
             </div>
 
             {inspector.type === "idle" ? (
-              <div className="empty-state inspector-empty">
-                {messages.app.inspectorEmpty}
+              <div className="inspector-empty">
+                <StarterGuide
+                  locale={locale}
+                  guide={starterGuide}
+                  onRunAction={(action) =>
+                    runStarterAction(
+                      action,
+                      packages,
+                      routes,
+                      setInspector,
+                      setSelectedPackageId,
+                      setSearchKind,
+                      setSearchText,
+                    )
+                  }
+                />
+                <div className="empty-state">{messages.app.inspectorEmpty}</div>
               </div>
             ) : (
               <>
@@ -1490,6 +1537,65 @@ function inspectGraphItem(
   startTransition(() => {
     setSearchKind(preferredSearchKind(item.kind));
     setSearchText(getSearchSeed(item));
+  });
+}
+
+function runStarterAction(
+  action: WorkspaceStarterAction,
+  packages: PackageSummary[],
+  routes: RouteSummary[],
+  setInspector: (value: InspectorMode) => void,
+  setSelectedPackageId: (value: string | ((current: string) => string)) => void,
+  setSearchKind: (value: string) => void,
+  setSearchText: (value: string) => void,
+) {
+  if (action.kind === "route" && action.targetId) {
+    const route = routes.find((entry) => entry.id === action.targetId);
+    if (route) {
+      startTransition(() => {
+        setSearchKind("route");
+        setSearchText(route.id);
+        setInspector({ type: "route", route });
+      });
+      return;
+    }
+  }
+
+  if (action.kind === "file" && action.targetPath) {
+    startTransition(() => {
+      setSearchKind("file");
+      setSearchText(action.targetPath ?? action.query);
+      setInspector({
+        type: "search",
+        item: {
+          id: `starter-file:${action.targetPath}`,
+          kind: "file",
+          label: action.targetPath,
+          path: action.targetPath,
+        },
+      });
+    });
+    return;
+  }
+
+  if (action.kind === "package" && action.targetId) {
+    const matchingPackage =
+      packages.find((entry) => entry.id === action.targetId) ??
+      packages.find((entry) => entry.label === action.query);
+
+    if (matchingPackage) {
+      startTransition(() => {
+        setSelectedPackageId(matchingPackage.id);
+        setSearchKind("package");
+        setSearchText(matchingPackage.label);
+      });
+      return;
+    }
+  }
+
+  startTransition(() => {
+    setSearchKind(action.kind);
+    setSearchText(action.query);
   });
 }
 
