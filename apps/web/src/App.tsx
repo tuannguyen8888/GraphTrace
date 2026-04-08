@@ -31,6 +31,7 @@ import {
   type WorkspaceHomeSummary,
   buildWorkspaceCards,
 } from "./home-view-model";
+import { buildRouteHref, parseRouteState } from "./route-state";
 import {
   type GraphItem,
   type PackageListEntry,
@@ -582,6 +583,23 @@ export function App() {
       <section className="app-frame">
         <header className="command-deck">
           <div className="command-copy">
+            {selectedWorkspace ? (
+              <div className="workspace-breadcrumb">
+                <button
+                  className="ghost-button"
+                  type="button"
+                  onClick={() => {
+                    startTransition(() => {
+                      setSelectedWorkspaceId("");
+                    });
+                  }}
+                >
+                  Workspaces
+                </button>
+                <span>/</span>
+                <strong>{selectedWorkspace.label}</strong>
+              </div>
+            ) : null}
             <span className="eyebrow">LOCAL-FIRST CODE GRAPH</span>
             <h1>GraphTrace</h1>
             <p>
@@ -604,7 +622,7 @@ export function App() {
               Back to workspaces
             </button>
             <label className="field repo-picker">
-              <span>Repository</span>
+              <span>Repository Scope</span>
               <select
                 value={selectedRepositoryId}
                 onChange={(event) => {
@@ -1455,55 +1473,27 @@ function getSearchSeed(item: Pick<GraphItem, "kind" | "label" | "path">) {
 }
 
 function readRepositoryFromLocation() {
-  if (typeof window === "undefined") {
-    return ".";
-  }
-
-  return new URL(window.location.href).searchParams.get("repository") ?? ".";
+  return readRouteStateFromLocation().repositoryId;
 }
 
 function readWorkspaceFromLocation() {
-  if (typeof window === "undefined") {
-    return "";
-  }
-
-  return new URL(window.location.href).searchParams.get("workspace") ?? "";
+  return readRouteStateFromLocation().workspaceId;
 }
 
 function readScopeFromLocation(): ScopeMode {
-  if (typeof window === "undefined") {
-    return "primary";
-  }
-
-  const scope = new URL(window.location.href).searchParams.get("scope");
-  return scope === "all" || scope === "tests" ? scope : "primary";
+  return readRouteStateFromLocation().scopeMode;
 }
 
 function readPackageFromLocation() {
-  if (typeof window === "undefined") {
-    return "";
-  }
-
-  return new URL(window.location.href).searchParams.get("package") ?? "";
+  return readRouteStateFromLocation().selectedPackageId;
 }
 
 function readSearchTextFromLocation() {
-  if (typeof window === "undefined") {
-    return "";
-  }
-
-  return new URL(window.location.href).searchParams.get("q") ?? "";
+  return readRouteStateFromLocation().searchText;
 }
 
 function readSearchKindFromLocation() {
-  if (typeof window === "undefined") {
-    return "symbol";
-  }
-
-  const kind = new URL(window.location.href).searchParams.get("kind");
-  return kind === "route" || kind === "file" || kind === "package"
-    ? kind
-    : "symbol";
+  return readRouteStateFromLocation().searchKind;
 }
 
 function buildRepositoryQuery(repositoryId: string, hasExistingQuery = false) {
@@ -1530,38 +1520,22 @@ function syncUiStateToLocation(state: {
     return;
   }
 
-  const url = new URL(window.location.href);
+  window.history.replaceState({}, "", buildRouteHref(state));
+}
 
-  if (!state.workspaceId) {
-    url.searchParams.delete("workspace");
-    url.searchParams.delete("repository");
-    url.searchParams.delete("scope");
-    url.searchParams.delete("package");
-    url.searchParams.delete("q");
-    url.searchParams.delete("kind");
-    window.history.replaceState({}, "", url);
-    return;
+function readRouteStateFromLocation() {
+  if (typeof window === "undefined") {
+    return {
+      workspaceId: "",
+      repositoryId: ".",
+      scopeMode: "primary" as const,
+      selectedPackageId: "",
+      searchText: "",
+      searchKind: "symbol",
+    };
   }
 
-  url.searchParams.set("workspace", state.workspaceId);
-  url.searchParams.set("repository", state.repositoryId);
-  url.searchParams.set("scope", state.scopeMode);
-
-  if (state.selectedPackageId) {
-    url.searchParams.set("package", state.selectedPackageId);
-  } else {
-    url.searchParams.delete("package");
-  }
-
-  if (state.searchText.trim()) {
-    url.searchParams.set("q", state.searchText);
-    url.searchParams.set("kind", state.searchKind);
-  } else {
-    url.searchParams.delete("q");
-    url.searchParams.delete("kind");
-  }
-
-  window.history.replaceState({}, "", url);
+  return parseRouteState(window.location.href);
 }
 
 function formatTimestamp(value?: string | null) {

@@ -10,6 +10,10 @@ import {
   type WorkspaceHomeSummary,
   buildWorkspaceCards,
 } from "../../../apps/web/src/home-view-model";
+import {
+  buildRouteHref,
+  parseRouteState,
+} from "../../../apps/web/src/route-state";
 import type {
   GraphItem,
   PackageSummary,
@@ -450,5 +454,44 @@ describe("web ui view-model", () => {
       ]),
     );
     expect(cards[0]?.subline).toContain("/tmp/GraphTrace");
+  });
+
+  test("parses and rebuilds workspace detail routes with inner filters", () => {
+    const state = parseRouteState(
+      "http://127.0.0.1:4310/workspaces/graphtrace-123abc?repository=packages/server&scope=all&package=package%3Apackages%2Fserver&q=runCli&kind=symbol",
+    );
+
+    expect(state).toEqual(
+      expect.objectContaining({
+        workspaceId: "graphtrace-123abc",
+        repositoryId: "packages/server",
+        scopeMode: "all",
+        selectedPackageId: "package:packages/server",
+        searchText: "runCli",
+        searchKind: "symbol",
+      }),
+    );
+    expect(
+      buildRouteHref({
+        workspaceId: "graphtrace-123abc",
+        repositoryId: "packages/server",
+        scopeMode: "all",
+        selectedPackageId: "package:packages/server",
+        searchText: "runCli",
+        searchKind: "symbol",
+      }),
+    ).toBe(
+      "/workspaces/graphtrace-123abc?repository=packages%2Fserver&scope=all&package=package%3Apackages%2Fserver&q=runCli&kind=symbol",
+    );
+    expect(
+      buildRouteHref({
+        workspaceId: "",
+        repositoryId: ".",
+        scopeMode: "primary",
+        selectedPackageId: "",
+        searchText: "",
+        searchKind: "symbol",
+      }),
+    ).toBe("/");
   });
 });
