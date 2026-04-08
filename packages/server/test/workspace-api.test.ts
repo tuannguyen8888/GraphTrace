@@ -89,4 +89,43 @@ describe("workspace api", () => {
       daemon.close();
     }
   });
+
+  test("adds a workspace through the API and returns it on the home list", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "graphtrace-daemon-"));
+    const daemon = createGraphTraceDaemon({ homeDir });
+    const app = createGraphTraceApp({ daemon });
+
+    try {
+      const added = await app.inject({
+        method: "POST",
+        url: "/api/workspaces",
+        payload: {
+          rootPath: fixtureRoot,
+          label: "fixture",
+        },
+      });
+      const workspaces = await app.inject({
+        method: "GET",
+        url: "/api/workspaces",
+      });
+
+      expect(added.statusCode).toBe(201);
+      expect(added.json()).toEqual(
+        expect.objectContaining({
+          label: "fixture",
+        }),
+      );
+      expect(workspaces.statusCode).toBe(200);
+      expect(workspaces.json().items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            label: "fixture",
+          }),
+        ]),
+      );
+    } finally {
+      await app.close();
+      daemon.close();
+    }
+  });
 });

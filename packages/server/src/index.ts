@@ -263,8 +263,28 @@ function registerWorkspaceScopedRoutes(
   }
 
   app.get("/api/workspaces", async () => ({
-    items: daemon.listWorkspaces(),
+    items: daemon.listWorkspaceSummaries(),
   }));
+
+  app.post("/api/workspaces", async (request, reply) => {
+    const body = (request.body ?? {}) as {
+      rootPath?: string;
+      label?: string;
+    };
+
+    if (!body.rootPath?.trim()) {
+      reply.code(400);
+      return {
+        error: "root_path_required",
+      };
+    }
+
+    const workspace = await daemon.addWorkspace(body.rootPath, {
+      label: body.label?.trim() || undefined,
+    });
+    reply.code(201);
+    return workspace;
+  });
 
   app.get("/api/workspaces/:workspaceId/repositories", async (request) => {
     const { workspaceId } = request.params as { workspaceId: string };

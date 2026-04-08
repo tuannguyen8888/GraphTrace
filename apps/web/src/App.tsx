@@ -1,14 +1,36 @@
-import { startTransition, useDeferredValue, useEffect, useState } from "react";
+import {
+  type FormEvent,
+  startTransition,
+  useDeferredValue,
+  useEffect,
+  useState,
+} from "react";
 
 import type { RepositorySummary } from "@graphtrace/shared";
 import { pathBelongsToRepository } from "@graphtrace/shared";
 
+import {
+  addWorkspace,
+  getFileDependencies,
+  getFileImpact,
+  getRouteFlow,
+  getWorkspacePackages,
+  getWorkspaceRepositories,
+  getWorkspaceRoutes,
+  getWorkspaceStatus,
+  getWorkspaces,
+  searchWorkspace,
+} from "./api-client";
 import {
   type GraphEdgeFilters,
   buildArchitectureGraph,
   layoutArchitectureGraph,
 } from "./architecture-graph";
 import { GraphWorkspace } from "./graph-workspace";
+import {
+  type WorkspaceHomeSummary,
+  buildWorkspaceCards,
+} from "./home-view-model";
 import {
   type GraphItem,
   type PackageListEntry,
@@ -28,6 +50,7 @@ import {
   looksLikeSourcePath,
   matchesScope,
 } from "./view-model";
+import { WorkspaceHome } from "./workspace-home";
 
 type InspectorMode =
   | { type: "idle" }
@@ -57,10 +80,14 @@ const scopeOptions: Array<{
 ];
 
 export function App() {
+  const [workspaces, setWorkspaces] = useState<WorkspaceHomeSummary[]>([]);
   const [status, setStatus] = useState<WorkspaceStatus | null>(null);
   const [repositories, setRepositories] = useState<RepositorySummary[]>([]);
   const [packages, setPackages] = useState<PackageSummary[]>([]);
   const [routes, setRoutes] = useState<RouteSummary[]>([]);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(() =>
+    readWorkspaceFromLocation(),
+  );
   const [selectedRepositoryId, setSelectedRepositoryId] = useState(() =>
     readRepositoryFromLocation(),
   );
@@ -92,7 +119,13 @@ export function App() {
   const [impactItems, setImpactItems] = useState<GraphItem[]>([]);
   const [workspaceError, setWorkspaceError] = useState("");
   const [refreshNonce, setRefreshNonce] = useState(0);
+  const [draftRootPath, setDraftRootPath] = useState("");
+  const [draftLabel, setDraftLabel] = useState("");
+  const [addingWorkspace, setAddingWorkspace] = useState(false);
   const deferredSearchText = useDeferredValue(searchText);
+  const workspaceCards = buildWorkspaceCards(workspaces);
+  const selectedWorkspace =
+    workspaces.find((entry) => entry.id === selectedWorkspaceId) ?? null;
 
   const selectedRepository =
     repositories.find((entry) => entry.id === selectedRepositoryId) ??
@@ -191,12 +224,60 @@ export function App() {
   useEffect(() => {
     let cancelled = false;
 
+    const loadWorkspaces = async () => {
+      try {
+        const payload = await getWorkspaces(refreshNonce);
+
+        if (cancelled) {
+          return;
+        }
+
+        startTransition(() => {
+          setWorkspaces(payload.items ?? []);
+          if (
+            selectedWorkspaceId &&
+            !(payload.items ?? []).some(
+              (entry) => entry.id === selectedWorkspaceId,
+            )
+          ) {
+            setSelectedWorkspaceId("");
+          }
+        });
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        startTransition(() => {
+          setWorkspaceError(
+            error instanceof Error
+              ? error.message
+              : "Không tải được danh sách workspace.",
+          );
+        });
+      }
+    };
+
+    void loadWorkspaces();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshNonce, selectedWorkspaceId]);
+
+  useEffect(() => {
+    if (!selectedWorkspaceId) {
+      return;
+    }
+
+    let cancelled = false;
+
     const loadWorkspaceData = async () => {
       try {
-        const refreshQuery = buildRefreshQuery(refreshNonce);
-        const repositoriesPayload = await fetchJson<
-          QueryResult<RepositorySummary>
-        >(`/api/repositories${refreshQuery}`);
+        const repositoriesPayload = await getWorkspaceRepositories(
+          selectedWorkspaceId,
+          refreshNonce,
+        );
         const availableRepositories = repositoriesPayload.items ?? [];
         const nextRepositoryId =
           availableRepositories.find(
@@ -204,18 +285,22 @@ export function App() {
           )?.id ??
           availableRepositories[0]?.id ??
           ".";
-        const repositoryQuery = buildRepositoryQuery(nextRepositoryId);
-        const refreshSuffix = buildRefreshQuery(refreshNonce, true);
         const [statusPayload, packagesPayload, routesPayload] =
           await Promise.all([
-            fetchJson<WorkspaceStatus>(
-              `/api/status${repositoryQuery}${refreshSuffix}`,
+            getWorkspaceStatus(
+              selectedWorkspaceId,
+              refreshNonce,
+              nextRepositoryId,
             ),
-            fetchJson<QueryResult<PackageSummary>>(
-              `/api/packages${repositoryQuery}${refreshSuffix}`,
+            getWorkspacePackages(
+              selectedWorkspaceId,
+              refreshNonce,
+              nextRepositoryId,
             ),
-            fetchJson<QueryResult<RouteSummary>>(
-              `/api/routes${repositoryQuery}${refreshSuffix}`,
+            getWorkspaceRoutes(
+              selectedWorkspaceId,
+              refreshNonce,
+              nextRepositoryId,
             ),
           ]);
 
@@ -254,23 +339,20 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [refreshNonce, selectedRepositoryId]);
+  }, [refreshNonce, selectedRepositoryId, selectedWorkspaceId]);
 
   useEffect(() => {
-    if (!deferredSearchText.trim()) {
+    if (!selectedWorkspaceId || !deferredSearchText.trim()) {
       setSearchResults([]);
       return;
     }
 
-    const query = new URLSearchParams({
-      q: deferredSearchText,
-      kind: searchKind,
-    });
-    if (selectedRepositoryId) {
-      query.set("repository", selectedRepositoryId);
-    }
-
-    void fetchJson<QueryResult<SearchResult>>(`/api/search?${query.toString()}`)
+    void searchWorkspace(
+      selectedWorkspaceId,
+      deferredSearchText,
+      searchKind,
+      selectedRepositoryId,
+    )
       .then((payload) => {
         startTransition(() => {
           setSearchResults(payload.items ?? []);
@@ -281,10 +363,15 @@ export function App() {
           setSearchResults([]);
         });
       });
-  }, [deferredSearchText, searchKind, selectedRepositoryId]);
+  }, [
+    deferredSearchText,
+    searchKind,
+    selectedRepositoryId,
+    selectedWorkspaceId,
+  ]);
 
   useEffect(() => {
-    if (inspector.type === "idle") {
+    if (!selectedWorkspaceId || inspector.type === "idle") {
       return;
     }
 
@@ -293,13 +380,14 @@ export function App() {
     const loadInspector = async () => {
       setDetailLoading(true);
       setDetailError("");
-      const repositoryQuery = buildRepositoryQuery(selectedRepositoryId, true);
-      const refreshSuffix = buildRefreshQuery(refreshNonce, true);
 
       try {
         if (inspector.type === "route") {
-          const flowPayload = await fetchJson<QueryResult<GraphItem>>(
-            `/api/flow?target=${encodeURIComponent(inspector.route.id)}${repositoryQuery}${refreshSuffix}`,
+          const flowPayload = await getRouteFlow(
+            selectedWorkspaceId,
+            inspector.route.id,
+            refreshNonce,
+            selectedRepositoryId,
           );
 
           if (cancelled) {
@@ -316,11 +404,17 @@ export function App() {
           looksLikeSourcePath(inspector.item.path)
         ) {
           const [depsPayload, impactPayload] = await Promise.all([
-            fetchJson<QueryResult<GraphItem>>(
-              `/api/deps?target=${encodeURIComponent(inspector.item.path)}&direction=both&depth=2${repositoryQuery}${refreshSuffix}`,
+            getFileDependencies(
+              selectedWorkspaceId,
+              inspector.item.path,
+              refreshNonce,
+              selectedRepositoryId,
             ),
-            fetchJson<QueryResult<GraphItem>>(
-              `/api/impact?target=${encodeURIComponent(inspector.item.path)}&depth=4${repositoryQuery}${refreshSuffix}`,
+            getFileImpact(
+              selectedWorkspaceId,
+              inspector.item.path,
+              refreshNonce,
+              selectedRepositoryId,
             ),
           ]);
 
@@ -369,7 +463,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [inspector, refreshNonce, selectedRepositoryId]);
+  }, [inspector, refreshNonce, selectedRepositoryId, selectedWorkspaceId]);
 
   useEffect(() => {
     if (!selectedPackageId) {
@@ -400,6 +494,7 @@ export function App() {
 
   useEffect(() => {
     syncUiStateToLocation({
+      workspaceId: selectedWorkspaceId,
       repositoryId: selectedRepositoryId,
       scopeMode,
       selectedPackageId,
@@ -412,7 +507,68 @@ export function App() {
     searchText,
     selectedPackageId,
     selectedRepositoryId,
+    selectedWorkspaceId,
   ]);
+
+  const handleAddWorkspace = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setAddingWorkspace(true);
+
+    try {
+      const created = await addWorkspace({
+        rootPath: draftRootPath,
+        label: draftLabel || undefined,
+      });
+
+      startTransition(() => {
+        setDraftRootPath("");
+        setDraftLabel("");
+        setSelectedWorkspaceId(created.id);
+        setSelectedRepositoryId(".");
+        setSelectedPackageId("");
+        setSearchText("");
+        setSearchResults([]);
+        setInspector({ type: "idle" });
+        setRefreshNonce((value) => value + 1);
+        setWorkspaceError("");
+      });
+    } catch (error) {
+      startTransition(() => {
+        setWorkspaceError(
+          error instanceof Error
+            ? error.message
+            : "Không add được workspace mới.",
+        );
+      });
+    } finally {
+      setAddingWorkspace(false);
+    }
+  };
+
+  if (!selectedWorkspaceId) {
+    return (
+      <WorkspaceHome
+        cards={workspaceCards}
+        workspaceError={workspaceError}
+        addingWorkspace={addingWorkspace}
+        draftRootPath={draftRootPath}
+        draftLabel={draftLabel}
+        onDraftRootPathChange={setDraftRootPath}
+        onDraftLabelChange={setDraftLabel}
+        onAddWorkspace={handleAddWorkspace}
+        onOpenWorkspace={(workspaceId) => {
+          startTransition(() => {
+            setSelectedWorkspaceId(workspaceId);
+            setSelectedRepositoryId(".");
+            setSelectedPackageId("");
+            setSearchText("");
+            setSearchResults([]);
+            setInspector({ type: "idle" });
+          });
+        }}
+      />
+    );
+  }
 
   const relatedPackageItems = routeInsights.relatedPackages.map((entry) => ({
     id: entry.id,
@@ -436,6 +592,17 @@ export function App() {
           </div>
 
           <div className="command-actions">
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={() => {
+                startTransition(() => {
+                  setSelectedWorkspaceId("");
+                });
+              }}
+            >
+              Back to workspaces
+            </button>
             <label className="field repo-picker">
               <span>Repository</span>
               <select
@@ -473,6 +640,10 @@ export function App() {
             >
               Refresh graph
             </button>
+            <div className="status-note">
+              <span>Workspace</span>
+              <strong>{selectedWorkspace?.label ?? "Đang tải..."}</strong>
+            </div>
             <div className="status-note">
               <span>Last index</span>
               <strong>
@@ -1291,6 +1462,14 @@ function readRepositoryFromLocation() {
   return new URL(window.location.href).searchParams.get("repository") ?? ".";
 }
 
+function readWorkspaceFromLocation() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  return new URL(window.location.href).searchParams.get("workspace") ?? "";
+}
+
 function readScopeFromLocation(): ScopeMode {
   if (typeof window === "undefined") {
     return "primary";
@@ -1340,17 +1519,31 @@ function buildRefreshQuery(refreshNonce: number, hasExistingQuery = false) {
 }
 
 function syncUiStateToLocation(state: {
+  workspaceId: string;
   repositoryId: string;
   scopeMode: ScopeMode;
   selectedPackageId: string;
   searchKind: string;
   searchText: string;
 }) {
-  if (typeof window === "undefined" || !state.repositoryId) {
+  if (typeof window === "undefined") {
     return;
   }
 
   const url = new URL(window.location.href);
+
+  if (!state.workspaceId) {
+    url.searchParams.delete("workspace");
+    url.searchParams.delete("repository");
+    url.searchParams.delete("scope");
+    url.searchParams.delete("package");
+    url.searchParams.delete("q");
+    url.searchParams.delete("kind");
+    window.history.replaceState({}, "", url);
+    return;
+  }
+
+  url.searchParams.set("workspace", state.workspaceId);
   url.searchParams.set("repository", state.repositoryId);
   url.searchParams.set("scope", state.scopeMode);
 
@@ -1369,16 +1562,6 @@ function syncUiStateToLocation(state: {
   }
 
   window.history.replaceState({}, "", url);
-}
-
-async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(
-      `Request failed: ${response.status} ${response.statusText}`,
-    );
-  }
-  return (await response.json()) as T;
 }
 
 function formatTimestamp(value?: string | null) {

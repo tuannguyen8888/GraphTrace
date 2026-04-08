@@ -14,12 +14,29 @@ export interface CreateGraphTraceDaemonOptions {
   homeDir: string;
 }
 
+export interface WorkspaceHomeSummary {
+  id: string;
+  label: string;
+  canonicalRootPath: string;
+  status: WorkspaceRecord["status"];
+  dbPath: string;
+  snapshot: {
+    packageCount: number;
+    fileCount: number;
+    symbolCount: number;
+    routeCount: number;
+    queryEdgeCount: number;
+    lastIndexCompletedAt: string | null;
+  } | null;
+}
+
 export interface GraphTraceDaemon {
   addWorkspace(
     rootPath: string,
     options?: { label?: string; notes?: string; pinned?: boolean },
   ): Promise<WorkspaceRecord>;
   listWorkspaces(): WorkspaceRecord[];
+  listWorkspaceSummaries(): WorkspaceHomeSummary[];
   getWorkspace(workspaceId: string): WorkspaceRecord | null;
   removeWorkspace(workspaceId: string): void;
   reindexWorkspace(workspaceId: string): Promise<WorkspaceRecord>;
@@ -91,6 +108,30 @@ class DefaultGraphTraceDaemon implements GraphTraceDaemon {
 
   listWorkspaces(): WorkspaceRecord[] {
     return this.registry.listWorkspaces();
+  }
+
+  listWorkspaceSummaries(): WorkspaceHomeSummary[] {
+    return this.registry.listWorkspaces().map((workspace) => {
+      const snapshot = this.registry.getSnapshot(workspace.id);
+
+      return {
+        id: workspace.id,
+        label: workspace.label,
+        canonicalRootPath: workspace.canonicalRootPath,
+        status: workspace.status,
+        dbPath: workspace.dbPath,
+        snapshot: snapshot
+          ? {
+              packageCount: snapshot.packageCount,
+              fileCount: snapshot.fileCount,
+              symbolCount: snapshot.symbolCount,
+              routeCount: snapshot.routeCount,
+              queryEdgeCount: snapshot.queryEdgeCount,
+              lastIndexCompletedAt: snapshot.lastIndexCompletedAt,
+            }
+          : null,
+      };
+    });
   }
 
   getWorkspace(workspaceId: string): WorkspaceRecord | null {

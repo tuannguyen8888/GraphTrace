@@ -6,6 +6,10 @@ import {
   resolveRepositoryForPath,
 } from "@graphtrace/shared";
 
+import {
+  type WorkspaceHomeSummary,
+  buildWorkspaceCards,
+} from "../../../apps/web/src/home-view-model";
 import type {
   GraphItem,
   PackageSummary,
@@ -148,6 +152,39 @@ const units: DiscoveredUnit[] = [
     sourceRoots: ["fixtures/backend-frontend-workspace/backend"],
     parentUnitId: "unit:root",
     pluginMatches: [],
+  },
+];
+
+const workspaces: WorkspaceHomeSummary[] = [
+  {
+    id: "graphtrace-123abc",
+    label: "GraphTrace",
+    canonicalRootPath: "/tmp/GraphTrace",
+    status: "ready",
+    dbPath: "/tmp/.graphtrace/workspaces/graphtrace-123abc/index.db",
+    snapshot: {
+      packageCount: 8,
+      fileCount: 56,
+      symbolCount: 312,
+      routeCount: 4,
+      queryEdgeCount: 18,
+      lastIndexCompletedAt: "2026-04-07T20:00:00.000Z",
+    },
+  },
+  {
+    id: "tawaco-987def",
+    label: "tawaco",
+    canonicalRootPath: "/tmp/tawaco",
+    status: "indexing",
+    dbPath: "/tmp/.graphtrace/workspaces/tawaco-987def/index.db",
+    snapshot: {
+      packageCount: 3,
+      fileCount: 81,
+      symbolCount: 534,
+      routeCount: 0,
+      queryEdgeCount: 0,
+      lastIndexCompletedAt: null,
+    },
   },
 ];
 
@@ -393,5 +430,25 @@ describe("web ui view-model", () => {
     ).toBe(
       'graphtrace deps "packages/indexer/src/workspace.ts" --direction both --depth 2',
     );
+  });
+
+  test("builds workspace cards for the home screen with status-aware summaries", () => {
+    const cards = buildWorkspaceCards(workspaces);
+
+    expect(cards).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "graphtrace-123abc",
+          statusTone: "ready",
+          metricSummary: "8 packages · 56 files · 4 routes",
+        }),
+        expect.objectContaining({
+          id: "tawaco-987def",
+          statusTone: "indexing",
+          statusLabel: "Indexing",
+        }),
+      ]),
+    );
+    expect(cards[0]?.subline).toContain("/tmp/GraphTrace");
   });
 });
