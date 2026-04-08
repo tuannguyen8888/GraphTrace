@@ -159,6 +159,64 @@ const units: DiscoveredUnit[] = [
   },
 ];
 
+const monorepoUnits: DiscoveredUnit[] = [
+  {
+    id: "unit:root",
+    rootPath: ".",
+    displayName: "tawaco",
+    kind: "project",
+    language: "unknown",
+    tooling: "pnpm",
+    indexingMode: "shallow",
+    confidence: 100,
+    signals: [],
+    sourceRoots: ["apps", "src"],
+    pluginMatches: [],
+  },
+  {
+    id: "unit:apps",
+    rootPath: "apps",
+    displayName: "apps",
+    kind: "subproject",
+    language: "js-ts",
+    tooling: "pnpm",
+    indexingMode: "shallow",
+    confidence: 80,
+    signals: [],
+    sourceRoots: ["apps"],
+    parentUnitId: "unit:root",
+    pluginMatches: [],
+  },
+  {
+    id: "unit:apps/backoffice",
+    rootPath: "apps/backoffice",
+    displayName: "web",
+    kind: "app",
+    language: "js-ts",
+    tooling: "pnpm",
+    indexingMode: "full",
+    confidence: 95,
+    signals: [],
+    sourceRoots: ["apps/backoffice/src"],
+    parentUnitId: "unit:apps",
+    pluginMatches: [],
+  },
+  {
+    id: "unit:apps/kiosk",
+    rootPath: "apps/kiosk",
+    displayName: "web",
+    kind: "app",
+    language: "js-ts",
+    tooling: "pnpm",
+    indexingMode: "full",
+    confidence: 95,
+    signals: [],
+    sourceRoots: ["apps/kiosk/src"],
+    parentUnitId: "unit:apps",
+    pluginMatches: [],
+  },
+];
+
 const workspaces: WorkspaceHomeSummary[] = [
   {
     id: "graphtrace-123abc",
@@ -231,6 +289,29 @@ describe("web ui view-model", () => {
       ),
     ).toBe(true);
     expect(matchesScope("packages/cli/test/cli.test.ts", "tests")).toBe(true);
+  });
+
+  test("promotes nested app scopes as repository candidates and disambiguates duplicate labels", () => {
+    const repositories = deriveRepositories(monorepoUnits);
+
+    expect(repositories.map((entry) => entry.id)).toEqual([
+      ".",
+      "apps/backoffice",
+      "apps/kiosk",
+    ]);
+    expect(
+      repositories.find((entry) => entry.id === "apps/backoffice")?.label,
+    ).toBe("web · apps/backoffice");
+    expect(repositories.find((entry) => entry.id === "apps/kiosk")?.label).toBe(
+      "web · apps/kiosk",
+    );
+    expect(
+      resolveRepositoryForPath("apps/backoffice/src/main.tsx", repositories)
+        ?.id,
+    ).toBe("apps/backoffice");
+    expect(
+      resolveRepositoryForPath("apps/kiosk/src/main.tsx", repositories)?.id,
+    ).toBe("apps/kiosk");
   });
 
   test("builds package entries with disambiguation for duplicate labels", () => {
