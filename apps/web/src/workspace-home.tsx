@@ -1,13 +1,20 @@
 import type { FormEvent } from "react";
 
 import type { WorkspaceCard } from "./home-view-model";
+import {
+  getMessages,
+  type Locale,
+  SUPPORTED_LOCALES,
+} from "./i18n";
 
 interface WorkspaceHomeProps {
+  locale: Locale;
   cards: WorkspaceCard[];
   workspaceError: string;
   addingWorkspace: boolean;
   draftRootPath: string;
   draftLabel: string;
+  onLocaleChange: (value: Locale) => void;
   onDraftRootPathChange: (value: string) => void;
   onDraftLabelChange: (value: string) => void;
   onAddWorkspace: (event: FormEvent<HTMLFormElement>) => void;
@@ -15,17 +22,33 @@ interface WorkspaceHomeProps {
 }
 
 export function WorkspaceHome(props: WorkspaceHomeProps) {
+  const messages = getMessages(props.locale);
+
   return (
     <main className="app-shell">
       <section className="app-frame home-frame">
         <header className="command-deck">
           <div className="command-copy">
-            <span className="eyebrow">MULTI-WORKSPACE GRAPH TRACE</span>
+            <span className="eyebrow">{messages.home.eyebrow}</span>
             <h1>GraphTrace</h1>
-            <p>
-              Chọn một workspace đã index hoặc add repo mới để daemon quản lý
-              tập trung trong cùng một UI.
-            </p>
+            <p>{messages.home.intro}</p>
+          </div>
+          <div className="command-actions">
+            <label className="field repo-picker">
+              <span>{messages.localeLabel}</span>
+              <select
+                value={props.locale}
+                onChange={(event) =>
+                  props.onLocaleChange(event.target.value as Locale)
+                }
+              >
+                {SUPPORTED_LOCALES.map((entry) => (
+                  <option key={entry} value={entry}>
+                    {messages.localeNames[entry]}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
         </header>
 
@@ -36,19 +59,15 @@ export function WorkspaceHome(props: WorkspaceHomeProps) {
         <section className="home-grid">
           <article className="panel home-list-panel">
             <div className="panel-heading">
-              <span className="panel-kicker">Indexed workspaces</span>
-              <h2>Workspace home</h2>
-              <p>
-                Home screen giữ data từng repo tách biệt trước khi đi sâu vào
-                repository/package/graph.
-              </p>
+              <span className="panel-kicker">
+                {messages.home.indexedWorkspacesKicker}
+              </span>
+              <h2>{messages.home.title}</h2>
+              <p>{messages.home.description}</p>
             </div>
 
             {props.cards.length === 0 ? (
-              <div className="empty-home-state">
-                Chưa có workspace nào trong daemon này. Add repo đầu tiên ở cột
-                bên phải để bắt đầu.
-              </div>
+              <div className="empty-home-state">{messages.home.emptyState}</div>
             ) : (
               <div className="workspace-card-list">
                 {props.cards.map((card) => (
@@ -84,17 +103,14 @@ export function WorkspaceHome(props: WorkspaceHomeProps) {
 
           <aside className="panel home-form-panel">
             <div className="panel-heading">
-              <span className="panel-kicker">Add new repo</span>
-              <h2>Index a workspace</h2>
-              <p>
-                Paste path repo local. GraphTrace sẽ index vào managed storage,
-                không cần chạy thêm instance khác.
-              </p>
+              <span className="panel-kicker">{messages.home.addRepoKicker}</span>
+              <h2>{messages.home.addTitle}</h2>
+              <p>{messages.home.addDescription}</p>
             </div>
 
             <form className="workspace-form" onSubmit={props.onAddWorkspace}>
               <label className="field">
-                <span>Repo path</span>
+                <span>{messages.home.repoPathLabel}</span>
                 <input
                   required
                   type="text"
@@ -102,18 +118,18 @@ export function WorkspaceHome(props: WorkspaceHomeProps) {
                   onChange={(event) =>
                     props.onDraftRootPathChange(event.target.value)
                   }
-                  placeholder="/Users/.../my-repo"
+                  placeholder={messages.home.repoPathPlaceholder}
                 />
               </label>
               <label className="field">
-                <span>Label (optional)</span>
+                <span>{messages.home.labelOptional}</span>
                 <input
                   type="text"
                   value={props.draftLabel}
                   onChange={(event) =>
                     props.onDraftLabelChange(event.target.value)
                   }
-                  placeholder="my-repo"
+                  placeholder={messages.home.labelPlaceholder}
                 />
               </label>
               <button
@@ -122,8 +138,8 @@ export function WorkspaceHome(props: WorkspaceHomeProps) {
                 disabled={props.addingWorkspace}
               >
                 {props.addingWorkspace
-                  ? "Indexing workspace..."
-                  : "Add workspace"}
+                  ? messages.home.addingWorkspace
+                  : messages.home.addWorkspace}
               </button>
             </form>
           </aside>

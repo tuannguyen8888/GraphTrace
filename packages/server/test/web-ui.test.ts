@@ -393,6 +393,7 @@ describe("web ui view-model", () => {
   test("builds guided search quick picks for first-run repo triage", () => {
     const repositories = deriveRepositories(units);
     const guidance = buildSearchWorkbenchGuidance({
+      locale: "en",
       packages,
       routes,
       repositories,
@@ -419,6 +420,7 @@ describe("web ui view-model", () => {
   test("adapts guided search quick picks when scope and package change", () => {
     const repositories = deriveRepositories(units);
     const packageScoped = buildSearchWorkbenchGuidance({
+      locale: "en",
       packages,
       routes,
       repositories,
@@ -428,6 +430,7 @@ describe("web ui view-model", () => {
       searchKind: "route",
     });
     const testsScoped = buildSearchWorkbenchGuidance({
+      locale: "vi",
       packages,
       routes,
       repositories,
@@ -449,6 +452,7 @@ describe("web ui view-model", () => {
     ]);
     expect(packageScoped.kindGuide).toContain("HTTP");
     expect(testsScoped.emptyStateTitle).toContain("Bắt đầu");
+    expect(testsScoped.kindGuide).toContain("Route search");
   });
 
   test("derives route insights for related packages and query hints", () => {
@@ -518,7 +522,8 @@ describe("web ui view-model", () => {
   });
 
   test("builds workspace cards for the home screen with status-aware summaries", () => {
-    const cards = buildWorkspaceCards(workspaces);
+    const cards = buildWorkspaceCards(workspaces, "en");
+    const viCards = buildWorkspaceCards(workspaces, "vi");
 
     expect(cards).toEqual(
       expect.arrayContaining([
@@ -534,12 +539,15 @@ describe("web ui view-model", () => {
         }),
       ]),
     );
+    expect(cards[1]?.timestampLabel).toBe("Indexing workspace...");
+    expect(viCards[1]?.statusLabel).toBe("Đang lập chỉ mục");
+    expect(viCards[1]?.timestampLabel).toBe("Đang lập chỉ mục workspace...");
     expect(cards[0]?.subline).toContain("/tmp/GraphTrace");
   });
 
   test("parses and rebuilds workspace detail routes with inner filters", () => {
     const state = parseRouteState(
-      "http://127.0.0.1:4310/workspaces/graphtrace-123abc?repository=packages/server&scope=all&package=package%3Apackages%2Fserver&q=runCli&kind=symbol",
+      "http://127.0.0.1:4310/workspaces/graphtrace-123abc?repository=packages/server&scope=all&package=package%3Apackages%2Fserver&q=runCli&kind=symbol&lang=vi",
     );
 
     expect(state).toEqual(
@@ -550,6 +558,7 @@ describe("web ui view-model", () => {
         selectedPackageId: "package:packages/server",
         searchText: "runCli",
         searchKind: "symbol",
+        locale: "vi",
       }),
     );
     expect(
@@ -560,9 +569,10 @@ describe("web ui view-model", () => {
         selectedPackageId: "package:packages/server",
         searchText: "runCli",
         searchKind: "symbol",
+        locale: "vi",
       }),
     ).toBe(
-      "/workspaces/graphtrace-123abc?repository=packages%2Fserver&scope=all&package=package%3Apackages%2Fserver&q=runCli&kind=symbol",
+      "/workspaces/graphtrace-123abc?repository=packages%2Fserver&scope=all&package=package%3Apackages%2Fserver&q=runCli&kind=symbol&lang=vi",
     );
     expect(
       buildRouteHref({
@@ -572,7 +582,8 @@ describe("web ui view-model", () => {
         selectedPackageId: "",
         searchText: "",
         searchKind: "symbol",
+        locale: "vi",
       }),
-    ).toBe("/");
+    ).toBe("/?lang=vi");
   });
 });

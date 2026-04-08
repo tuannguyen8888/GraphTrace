@@ -1,3 +1,4 @@
+import { DEFAULT_LOCALE, type Locale, resolveLocale } from "./i18n";
 import type { ScopeMode } from "./view-model";
 
 export interface RouteState {
@@ -7,9 +8,13 @@ export interface RouteState {
   selectedPackageId: string;
   searchText: string;
   searchKind: string;
+  locale: Locale;
 }
 
-export function parseRouteState(href: string): RouteState {
+export function parseRouteState(
+  href: string,
+  fallbackLocale: Locale = DEFAULT_LOCALE,
+): RouteState {
   const url = new URL(href);
   const workspaceId = parseWorkspaceId(url.pathname);
   const scope = url.searchParams.get("scope");
@@ -25,12 +30,19 @@ export function parseRouteState(href: string): RouteState {
       kind === "route" || kind === "file" || kind === "package"
         ? kind
         : "symbol",
+    locale: resolveLocale(url.searchParams.get("lang"), fallbackLocale),
   };
 }
 
 export function buildRouteHref(state: RouteState): string {
   if (!state.workspaceId) {
-    return "/";
+    const url = new URL("/", "http://localhost");
+
+    if (state.locale !== DEFAULT_LOCALE) {
+      url.searchParams.set("lang", state.locale);
+    }
+
+    return `${url.pathname}${url.search}`;
   }
 
   const url = new URL(
@@ -47,6 +59,10 @@ export function buildRouteHref(state: RouteState): string {
   if (state.searchText.trim()) {
     url.searchParams.set("q", state.searchText);
     url.searchParams.set("kind", state.searchKind);
+  }
+
+  if (state.locale !== DEFAULT_LOCALE) {
+    url.searchParams.set("lang", state.locale);
   }
 
   return `${url.pathname}${url.search}`;

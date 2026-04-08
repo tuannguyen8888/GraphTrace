@@ -1,3 +1,9 @@
+import {
+  formatLocaleDateTime,
+  getMessages,
+  type Locale,
+} from "./i18n";
+
 export interface WorkspaceHomeSummary {
   id: string;
   label: string;
@@ -27,36 +33,53 @@ export interface WorkspaceCard {
 
 export function buildWorkspaceCards(
   workspaces: WorkspaceHomeSummary[],
+  locale: Locale,
 ): WorkspaceCard[] {
+  const messages = getMessages(locale);
+
   return workspaces.map((workspace) => ({
     id: workspace.id,
     label: workspace.label,
     subline: workspace.canonicalRootPath,
-    statusLabel: formatWorkspaceStatus(workspace.status),
+    statusLabel: formatWorkspaceStatus(workspace.status, locale),
     statusTone: workspace.status,
     metricSummary: workspace.snapshot
-      ? `${workspace.snapshot.packageCount} packages · ${workspace.snapshot.fileCount} files · ${workspace.snapshot.routeCount} routes`
-      : "Chưa có snapshot index.",
+      ? messages.workspaceCard.metricSummary({
+          packageCount: workspace.snapshot.packageCount,
+          fileCount: workspace.snapshot.fileCount,
+          routeCount: workspace.snapshot.routeCount,
+        })
+      : messages.workspaceCard.noSnapshot,
     timestampLabel: workspace.snapshot?.lastIndexCompletedAt
-      ? `Indexed ${new Date(workspace.snapshot.lastIndexCompletedAt).toLocaleString()}`
+      ? messages.workspaceCard.indexedAt({
+          timestamp: formatLocaleDateTime(
+            locale,
+            workspace.snapshot.lastIndexCompletedAt,
+          ),
+        })
       : workspace.status === "indexing"
-        ? "Đang index workspace..."
-        : "Chưa có lần index hoàn tất.",
+        ? messages.workspaceCard.indexingWorkspace
+        : messages.workspaceCard.noCompletedIndex,
     dbPath: workspace.dbPath,
   }));
 }
 
-export function formatWorkspaceStatus(status: WorkspaceHomeSummary["status"]) {
+export function formatWorkspaceStatus(
+  status: WorkspaceHomeSummary["status"],
+  locale: Locale,
+) {
+  const messages = getMessages(locale);
+
   switch (status) {
     case "ready":
-      return "Ready";
+      return messages.status.ready;
     case "indexing":
-      return "Indexing";
+      return messages.status.indexing;
     case "failed":
-      return "Failed";
+      return messages.status.failed;
     case "missing":
-      return "Missing";
+      return messages.status.missing;
     case "paused":
-      return "Paused";
+      return messages.status.paused;
   }
 }

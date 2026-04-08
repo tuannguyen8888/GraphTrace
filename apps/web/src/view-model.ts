@@ -1,6 +1,8 @@
 import type { DiscoveredUnit, RepositorySummary } from "@graphtrace/shared";
 import { pathBelongsToRepository } from "@graphtrace/shared";
 
+import { DEFAULT_LOCALE, getMessages, type Locale } from "./i18n";
+
 export interface IndexRunInfo {
   mode: string;
   completedAt: string | null;
@@ -96,6 +98,7 @@ export interface SearchWorkbenchGuidance {
 }
 
 export interface SearchWorkbenchGuidanceOptions {
+  locale: Locale;
   packages: PackageSummary[];
   routes: RouteSummary[];
   repositories?: RepositorySummary[];
@@ -144,7 +147,9 @@ export function buildPackageEntries(
   scopeMode: ScopeMode,
   repositories: RepositorySummary[] = [],
   selectedRepositoryId = ".",
+  locale: Locale = DEFAULT_LOCALE,
 ): PackageListEntry[] {
+  const messages = getMessages(locale);
   const filteredPackages = packages.filter((entry) =>
     matchesScope(entry.path, scopeMode),
   );
@@ -172,7 +177,7 @@ export function buildPackageEntries(
       ...entry,
       disambiguation: (labelCounts.get(entry.label) ?? 0) > 1,
       scope: classifyItemScope(entry.path),
-      secondaryLabel: entry.path ?? "workspace root",
+      secondaryLabel: entry.path ?? messages.common.workspaceRoot,
     }));
 }
 
@@ -239,7 +244,9 @@ export function filterSearchResultsForDisplay(
 export function buildRouteInsights(
   items: GraphItem[],
   packages: PackageSummary[],
+  locale: Locale = DEFAULT_LOCALE,
 ): RouteInsights {
+  const messages = getMessages(locale);
   const files = items.filter((item) => item.kind === "file" && item.path);
   const queryHints = items.filter((item) => item.kind === "query");
   const relatedPackages = new Map<string, PackageListEntry>();
@@ -254,7 +261,7 @@ export function buildRouteInsights(
       ...owningPackage,
       disambiguation: false,
       scope: classifyItemScope(owningPackage.path),
-      secondaryLabel: owningPackage.path ?? "workspace root",
+      secondaryLabel: owningPackage.path ?? messages.common.workspaceRoot,
     });
   }
 
@@ -270,6 +277,7 @@ export function buildRouteInsights(
 export function buildSearchWorkbenchGuidance(
   options: SearchWorkbenchGuidanceOptions,
 ): SearchWorkbenchGuidance {
+  const messages = getMessages(options.locale);
   const repositories = options.repositories ?? [];
   const selectedRepositoryId = options.selectedRepositoryId ?? ".";
   const visiblePackages = buildPackageEntries(
@@ -277,6 +285,7 @@ export function buildSearchWorkbenchGuidance(
     options.scopeMode,
     repositories,
     selectedRepositoryId,
+    options.locale,
   );
   const visibleRoutes = filterRoutesForDisplay(
     options.routes,
@@ -312,9 +321,11 @@ export function buildSearchWorkbenchGuidance(
     quickPicks.push({
       id: `quick-route:${anchorRoute.id}`,
       kind: "route",
-      label: `Bắt đầu từ route ${anchorRoute.id}`,
+      label: messages.searchWorkbench.routeQuickPickLabel({
+        routeId: anchorRoute.id,
+      }),
       query: anchorRoute.id,
-      reason: "Hợp khi chưa biết symbol name nhưng biết luồng HTTP cần trace.",
+      reason: messages.searchWorkbench.routeQuickPickReason,
     });
   }
 
@@ -322,9 +333,11 @@ export function buildSearchWorkbenchGuidance(
     quickPicks.push({
       id: `quick-package:${anchorPackage.id}`,
       kind: "package",
-      label: `Khoanh vùng package ${anchorPackage.label}`,
+      label: messages.searchWorkbench.packageQuickPickLabel({
+        packageLabel: anchorPackage.label,
+      }),
       query: anchorPackage.label,
-      reason: "Dùng package search để bó hẹp triage trước khi mở file cụ thể.",
+      reason: messages.searchWorkbench.packageQuickPickReason,
     });
   }
 
@@ -332,10 +345,11 @@ export function buildSearchWorkbenchGuidance(
     quickPicks.push({
       id: `quick-file:${anchorFilePath}`,
       kind: "file",
-      label: `Mở file ${anchorFilePath}`,
+      label: messages.searchWorkbench.fileQuickPickLabel({
+        filePath: anchorFilePath,
+      }),
       query: anchorFilePath,
-      reason:
-        "File search phù hợp khi cần mở đúng entrypoint hoặc handler path.",
+      reason: messages.searchWorkbench.fileQuickPickReason,
     });
   }
 
@@ -349,17 +363,20 @@ export function buildSearchWorkbenchGuidance(
   const contextLabel =
     selectedPackage?.label ??
     anchorPackage?.label ??
-    (selectedRepositoryId === "." ? "repo chính" : selectedRepositoryId);
+    (selectedRepositoryId === "."
+      ? messages.searchWorkbench.mainRepoLabel
+      : selectedRepositoryId);
 
   return {
-    emptyStateTitle: `Bắt đầu triage từ ${contextLabel}`,
-    emptyStateBody:
-      "Chọn một quick pick bên dưới để bắt đầu từ route, package, hoặc file thay vì đoán symbol ngẫu nhiên.",
-    kindGuide: describeSearchKind(options.searchKind),
+    emptyStateTitle: messages.searchWorkbench.startFromContext({
+      contextLabel,
+    }),
+    emptyStateBody: messages.searchWorkbench.intro,
+    kindGuide: describeSearchKind(options.searchKind, options.locale),
     triageSteps: [
-      `1. Đi từ route để thấy flow và query hints trong ${contextLabel}.`,
-      "2. Khoanh vùng package liên quan để cắt bớt noise.",
-      "3. Mở file hoặc dependency trace khi đã có entrypoint đủ rõ.",
+      messages.searchWorkbench.step1({ contextLabel }),
+      messages.searchWorkbench.step2,
+      messages.searchWorkbench.step3,
     ],
     quickPicks: dedupedQuickPicks.slice(0, 3),
   };
@@ -438,15 +455,20 @@ function scopeWeight(scope: ItemScope) {
   }
 }
 
-function describeSearchKind(kind: string) {
+function describeSearchKind(
+  kind: string,
+  locale: Locale = DEFAULT_LOCALE,
+) {
+  const messages = getMessages(locale);
+
   switch (kind) {
     case "route":
-      return "Route search hợp với HTTP ids như GET /api/impact hoặc path fragments của endpoint.";
+      return messages.searchWorkbench.searchKindGuide.route;
     case "file":
-      return "File search hợp với path fragments như packages/server/src/index.ts hoặc watch.test.ts.";
+      return messages.searchWorkbench.searchKindGuide.file;
     case "package":
-      return "Package search hợp với package name hoặc root path khi cần khoanh vùng một khu vực code.";
+      return messages.searchWorkbench.searchKindGuide.package;
     default:
-      return "Symbol search hợp khi đã biết function, class, export, hoặc token code cụ thể.";
+      return messages.searchWorkbench.searchKindGuide.symbol;
   }
 }
