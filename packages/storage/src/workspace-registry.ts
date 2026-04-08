@@ -110,7 +110,9 @@ class SqliteWorkspaceRegistry implements WorkspaceRegistry {
     this.homeDir = homeDir;
     this.dbPath = buildRegistryDbPath(homeDir);
     mkdirSync(dirname(this.dbPath), { recursive: true });
-    this.db = new DatabaseSync(this.dbPath);
+    this.db = new DatabaseSync(this.dbPath, {
+      timeout: 2_000,
+    });
     this.ensureSchema();
   }
 
@@ -348,6 +350,7 @@ class SqliteWorkspaceRegistry implements WorkspaceRegistry {
 
   private ensureSchema(): void {
     this.db.exec(`
+      PRAGMA journal_mode = WAL;
       PRAGMA foreign_keys = ON;
 
       CREATE TABLE IF NOT EXISTS workspaces (
