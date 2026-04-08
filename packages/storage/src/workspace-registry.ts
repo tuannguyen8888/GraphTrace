@@ -111,7 +111,7 @@ class SqliteWorkspaceRegistry implements WorkspaceRegistry {
     this.dbPath = buildRegistryDbPath(homeDir);
     mkdirSync(dirname(this.dbPath), { recursive: true });
     this.db = new DatabaseSync(this.dbPath, {
-      timeout: 2_000,
+      timeout: 10_000,
     });
     this.ensureSchema();
   }
