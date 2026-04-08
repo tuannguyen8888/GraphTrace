@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -123,6 +123,47 @@ describe("workspace api", () => {
           }),
         ]),
       );
+    } finally {
+      await app.close();
+      daemon.close();
+    }
+  });
+
+  test("marks missing workspaces and removes them through the API", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "graphtrace-daemon-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "graphtrace-missing-"));
+    const daemon = createGraphTraceDaemon({ homeDir });
+    const workspace = await daemon.addWorkspace(workspaceRoot, {
+      label: "temp-workspace",
+    });
+    await rm(workspaceRoot, { recursive: true, force: true });
+    const app = createGraphTraceApp({ daemon });
+
+    try {
+      const workspaces = await app.inject({
+        method: "GET",
+        url: "/api/workspaces",
+      });
+      const removed = await app.inject({
+        method: "DELETE",
+        url: `/api/workspaces/${workspace.id}`,
+      });
+      const afterRemoval = await app.inject({
+        method: "GET",
+        url: "/api/workspaces",
+      });
+
+      expect(workspaces.statusCode).toBe(200);
+      expect(workspaces.json().items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: workspace.id,
+            status: "missing",
+          }),
+        ]),
+      );
+      expect(removed.statusCode).toBe(200);
+      expect(afterRemoval.json().items).toEqual([]);
     } finally {
       await app.close();
       daemon.close();

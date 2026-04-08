@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+
 import {
   type createQueryEngine,
   runWorkspaceIndex,
@@ -107,19 +109,22 @@ class DefaultGraphTraceDaemon implements GraphTraceDaemon {
   }
 
   listWorkspaces(): WorkspaceRecord[] {
-    return this.registry.listWorkspaces();
+    return this.registry
+      .listWorkspaces()
+      .map((workspace) => this.decorateWorkspace(workspace));
   }
 
   listWorkspaceSummaries(): WorkspaceHomeSummary[] {
     return this.registry.listWorkspaces().map((workspace) => {
+      const decoratedWorkspace = this.decorateWorkspace(workspace);
       const snapshot = this.registry.getSnapshot(workspace.id);
 
       return {
-        id: workspace.id,
-        label: workspace.label,
-        canonicalRootPath: workspace.canonicalRootPath,
-        status: workspace.status,
-        dbPath: workspace.dbPath,
+        id: decoratedWorkspace.id,
+        label: decoratedWorkspace.label,
+        canonicalRootPath: decoratedWorkspace.canonicalRootPath,
+        status: decoratedWorkspace.status,
+        dbPath: decoratedWorkspace.dbPath,
         snapshot: snapshot
           ? {
               packageCount: snapshot.packageCount,
@@ -135,7 +140,8 @@ class DefaultGraphTraceDaemon implements GraphTraceDaemon {
   }
 
   getWorkspace(workspaceId: string): WorkspaceRecord | null {
-    return this.registry.getWorkspace(workspaceId);
+    const workspace = this.registry.getWorkspace(workspaceId);
+    return workspace ? this.decorateWorkspace(workspace) : null;
   }
 
   removeWorkspace(workspaceId: string): void {
@@ -186,6 +192,20 @@ class DefaultGraphTraceDaemon implements GraphTraceDaemon {
 
     if (!workspace) {
       throw new Error(`Unknown workspace: ${workspaceId}`);
+    }
+
+    return this.decorateWorkspace(workspace);
+  }
+
+  private decorateWorkspace(workspace: WorkspaceRecord): WorkspaceRecord {
+    if (
+      workspace.status !== "missing" &&
+      !existsSync(workspace.canonicalRootPath)
+    ) {
+      return {
+        ...workspace,
+        status: "missing",
+      };
     }
 
     return workspace;

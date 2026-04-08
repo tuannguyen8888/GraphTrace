@@ -286,6 +286,23 @@ function registerWorkspaceScopedRoutes(
     return workspace;
   });
 
+  app.delete("/api/workspaces/:workspaceId", async (request, reply) => {
+    const { workspaceId } = request.params as { workspaceId: string };
+    const workspace = daemon.getWorkspace(workspaceId);
+
+    if (!workspace) {
+      reply.code(404);
+      return {
+        error: "workspace_not_found",
+      };
+    }
+
+    daemon.removeWorkspace(workspaceId);
+    return {
+      ok: true,
+    };
+  });
+
   app.get("/api/workspaces/:workspaceId/repositories", async (request) => {
     const { workspaceId } = request.params as { workspaceId: string };
     return daemon.withWorkspaceQueryEngine(workspaceId, (engine) =>

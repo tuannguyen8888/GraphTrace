@@ -38,6 +38,7 @@ Current capabilities include:
 - workspace initialization and health checks
 - automatic unit discovery across flat repos, monorepos, and mixed project roots
 - full and incremental indexing into a local SQLite-backed graph store
+- one daemon-backed UI that can manage many indexed workspaces
 - foreground watch mode with stale cleanup on add, change, and delete
 - search, dependency tracing, impact analysis, route flow, and workspace status
 - route discovery for Express, Fastify, Nest, and Next App Router
@@ -78,7 +79,7 @@ pnpm test:smoke
 
 ## Quick Start
 
-Initialize GraphTrace in a workspace:
+Initialize GraphTrace inside one repo when you want repo-local config/index files:
 
 ```bash
 graphtrace init
@@ -120,6 +121,21 @@ Start the local web UI:
 
 ```bash
 graphtrace web --port 4310
+```
+
+Or run one multi-workspace daemon and add repos into managed storage:
+
+```bash
+graphtrace workspace add /absolute/path/to/repo --label my-repo
+graphtrace workspace list --json
+graphtrace serve --port 4310
+```
+
+Useful multi-workspace lifecycle commands:
+
+```bash
+graphtrace workspace reindex <workspace-id>
+graphtrace workspace remove <workspace-id>
 ```
 
 Start the MCP server:
@@ -209,9 +225,10 @@ GraphTrace is designed to help both individual developers and teams answer the q
 
 GraphTrace uses a graph-first local architecture:
 
-1. Source code is indexed into a local SQLite graph store.
-2. One query engine reads that graph and answers search, dependency, impact, flow, route, and status questions.
-3. The CLI, MCP server, local API server, and web UI all sit on top of the same local data model.
+1. Source code is indexed into either a repo-local SQLite graph store or a managed per-workspace DB under `~/.graphtrace/workspaces/<workspaceId>/index.db`.
+2. A central registry at `~/.graphtrace/registry.sqlite` tracks workspace metadata, snapshots, and lifecycle state for the daemon.
+3. One query engine reads a selected workspace graph and answers search, dependency, impact, flow, route, and status questions.
+4. The CLI, MCP server, local API server, and web UI all sit on top of the same local data model.
 
 For more detail, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
