@@ -1,5 +1,5 @@
-import { mkdirSync, rmSync } from "node:fs";
-import { dirname } from "node:path";
+import { mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import {
@@ -101,31 +101,40 @@ export function createWorkspaceRegistry(homeDir: string): WorkspaceRegistry {
   return new SqliteWorkspaceRegistry(homeDir);
 }
 
+const REGISTRY_LOCK_WAIT_MS = 10_000;
+const REGISTRY_LOCK_POLL_MS = 25;
+const REGISTRY_LOCK_STALE_MS = 30_000;
+
 class SqliteWorkspaceRegistry implements WorkspaceRegistry {
   readonly dbPath: string;
   readonly db: DatabaseSync;
   readonly homeDir: string;
+  readonly lockDirPath: string;
 
   constructor(homeDir: string) {
     this.homeDir = homeDir;
     this.dbPath = buildRegistryDbPath(homeDir);
+    this.lockDirPath = `${this.dbPath}.lock`;
     mkdirSync(dirname(this.dbPath), { recursive: true });
     this.db = new DatabaseSync(this.dbPath, {
       timeout: 10_000,
     });
-    this.ensureSchema();
+    this.withWriteLock(() => {
+      this.ensureSchema();
+    });
   }
 
   addWorkspace(
     rootPath: string,
     options: AddWorkspaceOptions = {},
   ): WorkspaceRecord {
-    const identity = deriveWorkspaceIdentity(rootPath, this.homeDir);
-    const now = new Date().toISOString();
-    const label = options.label?.trim() || identity.slug;
+    return this.withWriteLock(() => {
+      const identity = deriveWorkspaceIdentity(rootPath, this.homeDir);
+      const now = new Date().toISOString();
+      const label = options.label?.trim() || identity.slug;
 
-    this.db
-      .prepare(`
+      this.db
+        .prepare(`
         INSERT INTO workspaces (
           id,
           label,
@@ -152,20 +161,21 @@ class SqliteWorkspaceRegistry implements WorkspaceRegistry {
           notes = excluded.notes,
           pinned = excluded.pinned
       `)
-      .run(
-        identity.id,
-        label,
-        identity.rootPath,
-        identity.canonicalRootPath,
-        identity.slug,
-        now,
-        now,
-        identity.dbPath,
-        options.notes ?? null,
-        options.pinned ? 1 : 0,
-      );
+        .run(
+          identity.id,
+          label,
+          identity.rootPath,
+          identity.canonicalRootPath,
+          identity.slug,
+          now,
+          now,
+          identity.dbPath,
+          options.notes ?? null,
+          options.pinned ? 1 : 0,
+        );
 
-    return this.getWorkspace(identity.id)!;
+      return this.getWorkspace(identity.id)!;
+    });
   }
 
   listWorkspaces(): WorkspaceRecord[] {
@@ -186,45 +196,49 @@ class SqliteWorkspaceRegistry implements WorkspaceRegistry {
   }
 
   removeWorkspace(workspaceId: string): void {
-    const workspace = this.getWorkspace(workspaceId);
-    this.db
-      .prepare("DELETE FROM workspace_jobs WHERE workspace_id = ?")
-      .run(workspaceId);
-    this.db
-      .prepare("DELETE FROM workspace_snapshots WHERE workspace_id = ?")
-      .run(workspaceId);
-    this.db.prepare("DELETE FROM workspaces WHERE id = ?").run(workspaceId);
+    this.withWriteLock(() => {
+      const workspace = this.getWorkspace(workspaceId);
+      this.db
+        .prepare("DELETE FROM workspace_jobs WHERE workspace_id = ?")
+        .run(workspaceId);
+      this.db
+        .prepare("DELETE FROM workspace_snapshots WHERE workspace_id = ?")
+        .run(workspaceId);
+      this.db.prepare("DELETE FROM workspaces WHERE id = ?").run(workspaceId);
 
-    if (workspace) {
-      rmSync(dirname(workspace.dbPath), { recursive: true, force: true });
-    }
+      if (workspace) {
+        rmSync(dirname(workspace.dbPath), { recursive: true, force: true });
+      }
+    });
   }
 
   upsertSnapshot(
     workspaceId: string,
     snapshot: Partial<Omit<WorkspaceSnapshot, "workspaceId">>,
   ): WorkspaceSnapshot {
-    const current = this.getSnapshot(workspaceId);
-    const merged: WorkspaceSnapshot = {
-      workspaceId,
-      lastIndexMode: snapshot.lastIndexMode ?? current?.lastIndexMode ?? null,
-      lastIndexStartedAt:
-        snapshot.lastIndexStartedAt ?? current?.lastIndexStartedAt ?? null,
-      lastIndexCompletedAt:
-        snapshot.lastIndexCompletedAt ?? current?.lastIndexCompletedAt ?? null,
-      packageCount: snapshot.packageCount ?? current?.packageCount ?? 0,
-      fileCount: snapshot.fileCount ?? current?.fileCount ?? 0,
-      symbolCount: snapshot.symbolCount ?? current?.symbolCount ?? 0,
-      routeCount: snapshot.routeCount ?? current?.routeCount ?? 0,
-      queryEdgeCount: snapshot.queryEdgeCount ?? current?.queryEdgeCount ?? 0,
-      unitCount: snapshot.unitCount ?? current?.unitCount ?? 0,
-      repositoryCount:
-        snapshot.repositoryCount ?? current?.repositoryCount ?? 0,
-      errorSummary: snapshot.errorSummary ?? current?.errorSummary ?? null,
-    };
+    return this.withWriteLock(() => {
+      const current = this.getSnapshot(workspaceId);
+      const merged: WorkspaceSnapshot = {
+        workspaceId,
+        lastIndexMode: snapshot.lastIndexMode ?? current?.lastIndexMode ?? null,
+        lastIndexStartedAt:
+          snapshot.lastIndexStartedAt ?? current?.lastIndexStartedAt ?? null,
+        lastIndexCompletedAt:
+          snapshot.lastIndexCompletedAt ?? current?.lastIndexCompletedAt ?? null,
+        packageCount: snapshot.packageCount ?? current?.packageCount ?? 0,
+        fileCount: snapshot.fileCount ?? current?.fileCount ?? 0,
+        symbolCount: snapshot.symbolCount ?? current?.symbolCount ?? 0,
+        routeCount: snapshot.routeCount ?? current?.routeCount ?? 0,
+        queryEdgeCount:
+          snapshot.queryEdgeCount ?? current?.queryEdgeCount ?? 0,
+        unitCount: snapshot.unitCount ?? current?.unitCount ?? 0,
+        repositoryCount:
+          snapshot.repositoryCount ?? current?.repositoryCount ?? 0,
+        errorSummary: snapshot.errorSummary ?? current?.errorSummary ?? null,
+      };
 
-    this.db
-      .prepare(`
+      this.db
+        .prepare(`
         INSERT INTO workspace_snapshots (
           workspace_id,
           last_index_mode,
@@ -253,22 +267,23 @@ class SqliteWorkspaceRegistry implements WorkspaceRegistry {
           repository_count = excluded.repository_count,
           error_summary = excluded.error_summary
       `)
-      .run(
-        merged.workspaceId,
-        merged.lastIndexMode,
-        merged.lastIndexStartedAt,
-        merged.lastIndexCompletedAt,
-        merged.packageCount,
-        merged.fileCount,
-        merged.symbolCount,
-        merged.routeCount,
-        merged.queryEdgeCount,
-        merged.unitCount,
-        merged.repositoryCount,
-        merged.errorSummary,
-      );
+        .run(
+          merged.workspaceId,
+          merged.lastIndexMode,
+          merged.lastIndexStartedAt,
+          merged.lastIndexCompletedAt,
+          merged.packageCount,
+          merged.fileCount,
+          merged.symbolCount,
+          merged.routeCount,
+          merged.queryEdgeCount,
+          merged.unitCount,
+          merged.repositoryCount,
+          merged.errorSummary,
+        );
 
-    return this.getSnapshot(workspaceId)!;
+      return this.getSnapshot(workspaceId)!;
+    });
   }
 
   getSnapshot(workspaceId: string): WorkspaceSnapshot | null {
@@ -279,9 +294,10 @@ class SqliteWorkspaceRegistry implements WorkspaceRegistry {
   }
 
   createJob(workspaceId: string, type: WorkspaceJobType): WorkspaceJob {
-    const createdAt = new Date().toISOString();
-    const result = this.db
-      .prepare(`
+    return this.withWriteLock(() => {
+      const createdAt = new Date().toISOString();
+      const result = this.db
+        .prepare(`
         INSERT INTO workspace_jobs (
           workspace_id,
           type,
@@ -293,11 +309,12 @@ class SqliteWorkspaceRegistry implements WorkspaceRegistry {
         )
         VALUES (?, ?, 'queued', ?, NULL, NULL, NULL)
       `)
-      .run(workspaceId, type, createdAt);
+        .run(workspaceId, type, createdAt);
 
-    return this.db
-      .prepare("SELECT * FROM workspace_jobs WHERE id = ?")
-      .get(Number(result.lastInsertRowid)) as unknown as WorkspaceJob;
+      return this.db
+        .prepare("SELECT * FROM workspace_jobs WHERE id = ?")
+        .get(Number(result.lastInsertRowid)) as unknown as WorkspaceJob;
+    });
   }
 
   updateJobStatus(
@@ -305,13 +322,14 @@ class SqliteWorkspaceRegistry implements WorkspaceRegistry {
     status: WorkspaceJobStatus,
     options: { errorMessage?: string | null } = {},
   ): WorkspaceJob | null {
-    const now = new Date().toISOString();
-    const startedAt = status === "running" ? now : null;
-    const completedAt =
-      status === "completed" || status === "failed" ? now : null;
+    return this.withWriteLock(() => {
+      const now = new Date().toISOString();
+      const startedAt = status === "running" ? now : null;
+      const completedAt =
+        status === "completed" || status === "failed" ? now : null;
 
-    this.db
-      .prepare(`
+      this.db
+        .prepare(`
         UPDATE workspace_jobs
         SET
           status = ?,
@@ -320,18 +338,19 @@ class SqliteWorkspaceRegistry implements WorkspaceRegistry {
           error_message = ?
         WHERE id = ?
       `)
-      .run(
-        status,
-        startedAt,
-        completedAt,
-        options.errorMessage ?? null,
-        jobId,
-      );
+        .run(
+          status,
+          startedAt,
+          completedAt,
+          options.errorMessage ?? null,
+          jobId,
+        );
 
-    const row = this.db
-      .prepare("SELECT * FROM workspace_jobs WHERE id = ?")
-      .get(jobId) as WorkspaceJobRow | undefined;
-    return row ? mapJobRow(row) : null;
+      const row = this.db
+        .prepare("SELECT * FROM workspace_jobs WHERE id = ?")
+        .get(jobId) as WorkspaceJobRow | undefined;
+      return row ? mapJobRow(row) : null;
+    });
   }
 
   listJobs(workspaceId: string): WorkspaceJob[] {
@@ -396,6 +415,77 @@ class SqliteWorkspaceRegistry implements WorkspaceRegistry {
       );
     `);
   }
+
+  private withWriteLock<T>(action: () => T): T {
+    this.acquireWriteLock();
+
+    try {
+      return action();
+    } finally {
+      this.releaseWriteLock();
+    }
+  }
+
+  private acquireWriteLock(): void {
+    const deadline = Date.now() + REGISTRY_LOCK_WAIT_MS;
+
+    while (true) {
+      try {
+        mkdirSync(this.lockDirPath);
+        writeFileSync(
+          join(this.lockDirPath, "owner.json"),
+          JSON.stringify({
+            pid: process.pid,
+            acquiredAt: new Date().toISOString(),
+          }),
+          "utf8",
+        );
+        return;
+      } catch (error) {
+        if (!isLockExistsError(error)) {
+          throw error;
+        }
+
+        this.clearStaleWriteLock();
+
+        if (Date.now() >= deadline) {
+          throw new Error(
+            `Timed out waiting for workspace registry lock: ${this.lockDirPath}`,
+          );
+        }
+
+        sleepSync(REGISTRY_LOCK_POLL_MS);
+      }
+    }
+  }
+
+  private clearStaleWriteLock(): void {
+    try {
+      const stats = statSync(this.lockDirPath);
+
+      if (Date.now() - stats.mtimeMs > REGISTRY_LOCK_STALE_MS) {
+        rmSync(this.lockDirPath, { recursive: true, force: true });
+      }
+    } catch {
+      // Another process may have released the lock already.
+    }
+  }
+
+  private releaseWriteLock(): void {
+    rmSync(this.lockDirPath, { recursive: true, force: true });
+  }
+}
+
+function isLockExistsError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    (error as NodeJS.ErrnoException).code === "EEXIST"
+  );
+}
+
+function sleepSync(durationMs: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, durationMs);
 }
 
 interface WorkspaceRow {

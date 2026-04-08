@@ -752,6 +752,58 @@ describe("cli", () => {
     expect(JSON.parse(listedAfterRemoval.stdout).items).toEqual([]);
   });
 
+  test("concurrent workspace add commands do not hit SQLITE_BUSY", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "graphtrace-daemon-home-"));
+    const fixtureA = join(
+      process.cwd(),
+      "fixtures",
+      "express-prisma-workspace",
+    );
+    const fixtureB = join(process.cwd(), "fixtures", "fastify-workspace");
+
+    const [addA, addB] = await Promise.all([
+      runCliProcess(process.cwd(), [
+        "workspace",
+        "add",
+        fixtureA,
+        "--label",
+        "fixture-a",
+        "--home",
+        homeDir,
+      ]),
+      runCliProcess(process.cwd(), [
+        "workspace",
+        "add",
+        fixtureB,
+        "--label",
+        "fixture-b",
+        "--home",
+        homeDir,
+      ]),
+    ]);
+
+    const listed = await runCli(
+      ["workspace", "list", "--json", "--home", homeDir],
+      {
+        cwd: process.cwd(),
+      },
+    );
+    const listedPayload = JSON.parse(listed.stdout) as {
+      items: Array<{ label: string }>;
+    };
+
+    expect(addA.code).toBe(0);
+    expect(addB.code).toBe(0);
+    expect(addA.stderr).not.toContain("database is locked");
+    expect(addB.stderr).not.toContain("database is locked");
+    expect(listedPayload.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: "fixture-a" }),
+        expect.objectContaining({ label: "fixture-b" }),
+      ]),
+    );
+  }, 20_000);
+
   test("serve starts a multi-workspace daemon web server", async () => {
     const homeDir = await mkdtemp(join(tmpdir(), "graphtrace-daemon-home-"));
     const added = await runCli(
