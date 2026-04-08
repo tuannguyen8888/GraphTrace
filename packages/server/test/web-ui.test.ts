@@ -10,6 +10,7 @@ import {
   type WorkspaceHomeSummary,
   buildWorkspaceCards,
 } from "../../../apps/web/src/home-view-model";
+import { getMessages } from "../../../apps/web/src/i18n";
 import {
   buildRouteHref,
   parseRouteState,
@@ -25,6 +26,7 @@ import {
   buildPackageEntries,
   buildRouteInsights,
   buildSearchWorkbenchGuidance,
+  buildWorkspaceStarterGuide,
   filterRoutesForDisplay,
   filterSearchResultsForDisplay,
   matchesScope,
@@ -452,7 +454,79 @@ describe("web ui view-model", () => {
     ]);
     expect(packageScoped.kindGuide).toContain("HTTP");
     expect(testsScoped.emptyStateTitle).toContain("Bắt đầu");
-    expect(testsScoped.kindGuide).toContain("Route search");
+    expect(testsScoped.kindGuide).toContain("Tìm route");
+  });
+
+  test("builds starter actions that open concrete entrypoints before the inspector is active", () => {
+    const repositories = deriveRepositories(units);
+    const starterGuide = buildWorkspaceStarterGuide({
+      locale: "en",
+      packages,
+      routes,
+      repositories,
+      selectedRepositoryId: ".",
+      scopeMode: "primary",
+      selectedPackageId: "",
+    });
+
+    expect(starterGuide.actions.map((item) => item.kind)).toEqual([
+      "route",
+      "file",
+      "package",
+    ]);
+    expect(starterGuide.actions.map((item) => item.query)).toEqual([
+      "GET /api/impact",
+      "packages/server/src/index.ts",
+      "@graphtrace/server",
+    ]);
+  });
+
+  test("falls back to file-first starter actions when the current scope has no routes", () => {
+    const starterGuide = buildWorkspaceStarterGuide({
+      locale: "vi",
+      packages: [
+        {
+          id: "package:.",
+          label: "tawaco-kiosk",
+          path: ".",
+        },
+      ],
+      routes: [],
+      repositories: [
+        {
+          id: ".",
+          rootPath: ".",
+          label: "tawaco-kiosk",
+          kind: "primary",
+        },
+      ],
+      selectedRepositoryId: ".",
+      scopeMode: "primary",
+      selectedPackageId: "",
+    });
+
+    expect(starterGuide.actions.map((item) => item.kind)).toEqual(["package"]);
+    expect(starterGuide.title).toContain("Điểm bắt đầu");
+  });
+
+  test.each([
+    ["app intro", "intro", "Tìm trong code, xem route"],
+    [
+      "graph description",
+      "architectureGraphDescription",
+      "Đồ thị chỉ hiển thị vùng lân cận quanh vùng chọn hiện tại",
+    ],
+    [
+      "inspector empty",
+      "inspectorEmpty",
+      "Chọn một route, file hoặc kết quả tìm kiếm",
+    ],
+  ] satisfies Array<
+    [string, keyof ReturnType<typeof getMessages>["app"], string]
+  >)("uses Vietnamese copy for %s", (_label, key, expected) => {
+    const messages = getMessages("vi");
+
+    expect(messages.app[key]).toContain(expected);
   });
 
   test("derives route insights for related packages and query hints", () => {

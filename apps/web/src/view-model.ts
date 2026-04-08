@@ -89,12 +89,28 @@ export interface SearchQuickPick {
   reason: string;
 }
 
+export interface WorkspaceStarterAction {
+  id: string;
+  kind: "route" | "file" | "package";
+  label: string;
+  query: string;
+  reason: string;
+  targetId?: string;
+  targetPath?: string;
+}
+
 export interface SearchWorkbenchGuidance {
   emptyStateTitle: string;
   emptyStateBody: string;
   kindGuide: string;
   triageSteps: string[];
   quickPicks: SearchQuickPick[];
+}
+
+export interface WorkspaceStarterGuide {
+  title: string;
+  description: string;
+  actions: WorkspaceStarterAction[];
 }
 
 export interface SearchWorkbenchGuidanceOptions {
@@ -107,6 +123,8 @@ export interface SearchWorkbenchGuidanceOptions {
   selectedPackageId: string;
   searchKind: string;
 }
+
+type TriageAnchorOptions = Omit<SearchWorkbenchGuidanceOptions, "searchKind">;
 
 export function classifyItemScope(path?: string): ItemScope {
   if (!path || path === ".") {
@@ -278,77 +296,41 @@ export function buildSearchWorkbenchGuidance(
   options: SearchWorkbenchGuidanceOptions,
 ): SearchWorkbenchGuidance {
   const messages = getMessages(options.locale);
-  const repositories = options.repositories ?? [];
-  const selectedRepositoryId = options.selectedRepositoryId ?? ".";
-  const visiblePackages = buildPackageEntries(
-    options.packages,
-    options.scopeMode,
-    repositories,
-    selectedRepositoryId,
-    options.locale,
-  );
-  const visibleRoutes = filterRoutesForDisplay(
-    options.routes,
-    options.packages,
-    {
-      repositories,
-      selectedRepositoryId,
-      scopeMode: options.scopeMode,
-      selectedPackageId: options.selectedPackageId,
-    },
-  );
-  const selectedPackage =
-    options.packages.find((entry) => entry.id === options.selectedPackageId) ??
-    null;
-  const anchorRoute = visibleRoutes[0] ?? null;
-  const anchorPackage =
-    selectedPackage ??
-    (anchorRoute
-      ? findOwningPackage(anchorRoute.filePath, options.packages)
-      : (visiblePackages.find((entry) => entry.path && entry.path !== ".") ??
-        visiblePackages[0] ??
-        null));
-  const anchorFilePath =
-    anchorRoute?.filePath ??
-    (selectedPackage?.path && selectedPackage.path !== "."
-      ? selectedPackage.path
-      : anchorPackage?.path && anchorPackage.path !== "."
-        ? anchorPackage.path
-        : undefined);
+  const triageAnchors = resolveTriageAnchors(options);
   const quickPicks: SearchQuickPick[] = [];
 
-  if (anchorRoute) {
+  if (triageAnchors.anchorRoute) {
     quickPicks.push({
-      id: `quick-route:${anchorRoute.id}`,
+      id: `quick-route:${triageAnchors.anchorRoute.id}`,
       kind: "route",
       label: messages.searchWorkbench.routeQuickPickLabel({
-        routeId: anchorRoute.id,
+        routeId: triageAnchors.anchorRoute.id,
       }),
-      query: anchorRoute.id,
+      query: triageAnchors.anchorRoute.id,
       reason: messages.searchWorkbench.routeQuickPickReason,
     });
   }
 
-  if (anchorPackage) {
+  if (triageAnchors.anchorPackage) {
     quickPicks.push({
-      id: `quick-package:${anchorPackage.id}`,
+      id: `quick-package:${triageAnchors.anchorPackage.id}`,
       kind: "package",
       label: messages.searchWorkbench.packageQuickPickLabel({
-        packageLabel: anchorPackage.label,
+        packageLabel: triageAnchors.anchorPackage.label,
       }),
-      query: anchorPackage.label,
+      query: triageAnchors.anchorPackage.label,
       reason: messages.searchWorkbench.packageQuickPickReason,
     });
   }
 
-  if (anchorFilePath) {
+  if (triageAnchors.anchorFilePath) {
     quickPicks.push({
-      id: `quick-file:${anchorFilePath}`,
+      id: `quick-file:${triageAnchors.anchorFilePath}`,
       kind: "file",
       label: messages.searchWorkbench.fileQuickPickLabel({
-        filePath: anchorFilePath,
+        filePath: triageAnchors.anchorFilePath,
       }),
-      query: anchorFilePath,
+      query: triageAnchors.anchorFilePath,
       reason: messages.searchWorkbench.fileQuickPickReason,
     });
   }
@@ -360,25 +342,80 @@ export function buildSearchWorkbenchGuidance(
           candidate.kind === item.kind && candidate.query === item.query,
       ) === index,
   );
-  const contextLabel =
-    selectedPackage?.label ??
-    anchorPackage?.label ??
-    (selectedRepositoryId === "."
-      ? messages.searchWorkbench.mainRepoLabel
-      : selectedRepositoryId);
 
   return {
     emptyStateTitle: messages.searchWorkbench.startFromContext({
-      contextLabel,
+      contextLabel: triageAnchors.contextLabel,
     }),
     emptyStateBody: messages.searchWorkbench.intro,
     kindGuide: describeSearchKind(options.searchKind, options.locale),
     triageSteps: [
-      messages.searchWorkbench.step1({ contextLabel }),
+      messages.searchWorkbench.step1({
+        contextLabel: triageAnchors.contextLabel,
+      }),
       messages.searchWorkbench.step2,
       messages.searchWorkbench.step3,
     ],
     quickPicks: dedupedQuickPicks.slice(0, 3),
+  };
+}
+
+export function buildWorkspaceStarterGuide(
+  options: TriageAnchorOptions,
+): WorkspaceStarterGuide {
+  const messages = getMessages(options.locale);
+  const triageAnchors = resolveTriageAnchors(options);
+  const actions: WorkspaceStarterAction[] = [];
+
+  if (triageAnchors.anchorRoute) {
+    actions.push({
+      id: `starter-route:${triageAnchors.anchorRoute.id}`,
+      kind: "route",
+      label: messages.app.starterRouteActionLabel({
+        routeId: triageAnchors.anchorRoute.id,
+      }),
+      query: triageAnchors.anchorRoute.id,
+      reason: messages.app.starterRouteActionReason,
+      targetId: triageAnchors.anchorRoute.id,
+    });
+  }
+
+  if (triageAnchors.anchorFilePath) {
+    actions.push({
+      id: `starter-file:${triageAnchors.anchorFilePath}`,
+      kind: "file",
+      label: messages.app.starterFileActionLabel({
+        filePath: triageAnchors.anchorFilePath,
+      }),
+      query: triageAnchors.anchorFilePath,
+      reason: messages.app.starterFileActionReason,
+      targetPath: triageAnchors.anchorFilePath,
+    });
+  }
+
+  if (triageAnchors.anchorPackage) {
+    actions.push({
+      id: `starter-package:${triageAnchors.anchorPackage.id}`,
+      kind: "package",
+      label: messages.app.starterPackageActionLabel({
+        packageLabel: triageAnchors.anchorPackage.label,
+      }),
+      query: triageAnchors.anchorPackage.label,
+      reason: messages.app.starterPackageActionReason,
+      targetId: triageAnchors.anchorPackage.id,
+    });
+  }
+
+  return {
+    title: messages.app.starterGuideTitle,
+    description: messages.app.starterGuideDescription,
+    actions: actions.filter(
+      (item, index, items) =>
+        items.findIndex(
+          (candidate) =>
+            candidate.kind === item.kind && candidate.query === item.query,
+        ) === index,
+    ),
   };
 }
 
@@ -468,4 +505,58 @@ function describeSearchKind(kind: string, locale: Locale = DEFAULT_LOCALE) {
     default:
       return messages.searchWorkbench.searchKindGuide.symbol;
   }
+}
+
+function resolveTriageAnchors(options: TriageAnchorOptions) {
+  const messages = getMessages(options.locale);
+  const repositories = options.repositories ?? [];
+  const selectedRepositoryId = options.selectedRepositoryId ?? ".";
+  const visiblePackages = buildPackageEntries(
+    options.packages,
+    options.scopeMode,
+    repositories,
+    selectedRepositoryId,
+    options.locale,
+  );
+  const visibleRoutes = filterRoutesForDisplay(
+    options.routes,
+    options.packages,
+    {
+      repositories,
+      selectedRepositoryId,
+      scopeMode: options.scopeMode,
+      selectedPackageId: options.selectedPackageId,
+    },
+  );
+  const selectedPackage =
+    options.packages.find((entry) => entry.id === options.selectedPackageId) ??
+    null;
+  const anchorRoute = visibleRoutes[0] ?? null;
+  const anchorPackage =
+    selectedPackage ??
+    (anchorRoute
+      ? findOwningPackage(anchorRoute.filePath, options.packages)
+      : (visiblePackages.find((entry) => entry.path && entry.path !== ".") ??
+        visiblePackages[0] ??
+        null));
+  const anchorFilePath =
+    anchorRoute?.filePath ??
+    (selectedPackage?.path && selectedPackage.path !== "."
+      ? selectedPackage.path
+      : anchorPackage?.path && anchorPackage.path !== "."
+        ? anchorPackage.path
+        : undefined);
+  const contextLabel =
+    selectedPackage?.label ??
+    anchorPackage?.label ??
+    (selectedRepositoryId === "."
+      ? messages.searchWorkbench.mainRepoLabel
+      : selectedRepositoryId);
+
+  return {
+    anchorFilePath,
+    anchorPackage,
+    anchorRoute,
+    contextLabel,
+  };
 }

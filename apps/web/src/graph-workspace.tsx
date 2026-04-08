@@ -23,6 +23,11 @@ import type {
 } from "./architecture-graph";
 import { searchArchitectureGraphNodes } from "./architecture-graph";
 import { type Locale, getMessages } from "./i18n";
+import { StarterGuide } from "./starter-guide";
+import type {
+  WorkspaceStarterAction,
+  WorkspaceStarterGuide,
+} from "./view-model";
 
 import "@xyflow/react/dist/style.css";
 
@@ -31,6 +36,8 @@ interface GraphWorkspaceProps {
   graph: ArchitectureGraphModel;
   nodes: PositionedArchitectureGraphNode[];
   onSelectNode: (node: ArchitectureGraphNode) => void;
+  starterGuide: WorkspaceStarterGuide;
+  onRunStarterAction: (action: WorkspaceStarterAction) => void;
 }
 
 interface GraphFlowNodeData extends Record<string, unknown> {
@@ -121,7 +128,14 @@ function GraphWorkspaceInner(props: GraphWorkspaceProps) {
 
   if (props.graph.nodes.length === 0) {
     return (
-      <div className="empty-state graph-empty">{messages.graph.emptyState}</div>
+      <div className="empty-state graph-empty">
+        <StarterGuide
+          locale={props.locale}
+          guide={props.starterGuide}
+          onRunAction={props.onRunStarterAction}
+        />
+        <p>{messages.graph.emptyState}</p>
+      </div>
     );
   }
 

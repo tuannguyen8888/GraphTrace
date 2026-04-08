@@ -477,6 +477,33 @@ a {
     rgba(255, 255, 255, 0.045);
 }
 
+.starter-guide {
+  width: 100%;
+  display: grid;
+  gap: 14px;
+}
+
+.starter-guide-copy {
+  display: grid;
+  gap: 8px;
+}
+
+.starter-guide-copy h3 {
+  margin: 0;
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+  letter-spacing: -0.03em;
+  color: #f7fbff;
+}
+
+.starter-guide-copy p {
+  margin: 0;
+  color: #9fb0c8;
+}
+
+.starter-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
 .triage-steps {
   margin: 0;
   padding-left: 20px;
@@ -841,11 +868,16 @@ a {
 
 .inspector-empty {
   min-height: 160px;
-  align-content: center;
+  display: grid;
+  gap: 14px;
+  align-content: start;
 }
 
 .graph-empty {
   min-height: 280px;
+  gap: 16px;
+  align-content: start;
+  justify-items: stretch;
 }
 
 .empty-state,
