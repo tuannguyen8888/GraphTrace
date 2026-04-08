@@ -150,6 +150,9 @@ export interface IndexWorkspaceOptions {
   full?: boolean;
   changedFiles?: string[];
   removedFiles?: string[];
+  dbPath?: string;
+  persistWorkspaceArtifacts?: boolean;
+  configOverrides?: Partial<GraphTraceConfig>;
 }
 
 export interface IndexWorkspaceResult {
