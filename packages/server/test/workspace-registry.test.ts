@@ -40,7 +40,9 @@ describe("workspace registry", () => {
       expect(registry.listWorkspaces()).toEqual([
         expect.objectContaining({ id: created.id, label: "tawaco" }),
       ]);
-      await expect(access(join(workspaceRoot, ".graphtrace"))).rejects.toThrow();
+      await expect(
+        access(join(workspaceRoot, ".graphtrace")),
+      ).rejects.toThrow();
 
       registry.removeWorkspace(created.id);
       expect(registry.listWorkspaces()).toEqual([]);
@@ -51,8 +53,12 @@ describe("workspace registry", () => {
 
   test("allows concurrent workspace adds from separate processes", async () => {
     const homeDir = await mkdtemp(join(tmpdir(), "graphtrace-home-"));
-    const workspaceRootA = await mkdtemp(join(tmpdir(), "graphtrace-concurrent-a-"));
-    const workspaceRootB = await mkdtemp(join(tmpdir(), "graphtrace-concurrent-b-"));
+    const workspaceRootA = await mkdtemp(
+      join(tmpdir(), "graphtrace-concurrent-a-"),
+    );
+    const workspaceRootB = await mkdtemp(
+      join(tmpdir(), "graphtrace-concurrent-b-"),
+    );
     const scriptPath = join(homeDir, "add-workspace.mts");
 
     await writeFile(

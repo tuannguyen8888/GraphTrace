@@ -21,8 +21,8 @@ import type {
   ArchitectureGraphNode,
   PositionedArchitectureGraphNode,
 } from "./architecture-graph";
-import { getMessages, type Locale } from "./i18n";
 import { searchArchitectureGraphNodes } from "./architecture-graph";
+import { type Locale, getMessages } from "./i18n";
 
 import "@xyflow/react/dist/style.css";
 
@@ -120,7 +120,9 @@ function GraphWorkspaceInner(props: GraphWorkspaceProps) {
   ).slice(0, 8);
 
   if (props.graph.nodes.length === 0) {
-    return <div className="empty-state graph-empty">{messages.graph.emptyState}</div>;
+    return (
+      <div className="empty-state graph-empty">{messages.graph.emptyState}</div>
+    );
   }
 
   return (
@@ -203,7 +205,8 @@ function GraphWorkspaceInner(props: GraphWorkspaceProps) {
                 <span className="list-chip">{match.kind}</span>
                 <span className="list-title">{match.label}</span>
                 <span className="list-subtle">
-                  {match.path ?? `${match.cluster} ${messages.graph.clusterNode}`}
+                  {match.path ??
+                    `${match.cluster} ${messages.graph.clusterNode}`}
                 </span>
               </button>
             ))

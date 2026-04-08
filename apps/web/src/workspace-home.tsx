@@ -1,11 +1,7 @@
 import type { FormEvent } from "react";
 
 import type { WorkspaceCard } from "./home-view-model";
-import {
-  getMessages,
-  type Locale,
-  SUPPORTED_LOCALES,
-} from "./i18n";
+import { type Locale, SUPPORTED_LOCALES, getMessages } from "./i18n";
 
 interface WorkspaceHomeProps {
   locale: Locale;
@@ -103,7 +99,9 @@ export function WorkspaceHome(props: WorkspaceHomeProps) {
 
           <aside className="panel home-form-panel">
             <div className="panel-heading">
-              <span className="panel-kicker">{messages.home.addRepoKicker}</span>
+              <span className="panel-kicker">
+                {messages.home.addRepoKicker}
+              </span>
               <h2>{messages.home.addTitle}</h2>
               <p>{messages.home.addDescription}</p>
             </div>

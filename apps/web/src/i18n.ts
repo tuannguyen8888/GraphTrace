@@ -206,8 +206,7 @@ const enMessages = {
     searchKindGuide: {
       route:
         "Route search works best with HTTP ids like GET /api/impact or endpoint path fragments.",
-      file:
-        "File search works best with path fragments like packages/server/src/index.ts or watch.test.ts.",
+      file: "File search works best with path fragments like packages/server/src/index.ts or watch.test.ts.",
       package:
         "Package search works best with package names or root paths when you need to narrow to one code area.",
       symbol:
@@ -362,8 +361,7 @@ const viMessages: typeof enMessages = {
     dependenciesTitle: "Dependencies",
     dependenciesSubtitle: "Các điểm vào và ra trong bán kính 2 bước.",
     impactTitle: "Impact",
-    impactSubtitle:
-      "Những file và route dễ bị ảnh hưởng nếu chỉnh file này.",
+    impactSubtitle: "Những file và route dễ bị ảnh hưởng nếu chỉnh file này.",
     noItemsInTrace: "Không có item nào trong vùng trace này.",
     copiedPath: "Đã copy file path.",
     copiedCommand: "Đã copy GraphTrace command.",
@@ -408,13 +406,11 @@ const viMessages: typeof enMessages = {
     step1: (params: { contextLabel: string }) =>
       `1. Đi từ route để thấy flow và query hints trong ${params.contextLabel}.`,
     step2: "2. Khoanh vùng package liên quan để cắt bớt noise.",
-    step3:
-      "3. Mở file hoặc dependency trace khi đã có entrypoint đủ rõ.",
+    step3: "3. Mở file hoặc dependency trace khi đã có entrypoint đủ rõ.",
     searchKindGuide: {
       route:
         "Route search hợp với HTTP ids như GET /api/impact hoặc path fragments của endpoint.",
-      file:
-        "File search hợp với path fragments như packages/server/src/index.ts hoặc watch.test.ts.",
+      file: "File search hợp với path fragments như packages/server/src/index.ts hoặc watch.test.ts.",
       package:
         "Package search hợp với package name hoặc root path khi cần khoanh vùng một khu vực code.",
       symbol:

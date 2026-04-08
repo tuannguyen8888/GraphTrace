@@ -33,12 +33,12 @@ import {
 } from "./home-view-model";
 import {
   DEFAULT_LOCALE,
-  formatLocaleDateTime,
-  getMessages,
   LOCALE_STORAGE_KEY,
-  resolveLocale,
   type Locale,
   SUPPORTED_LOCALES,
+  formatLocaleDateTime,
+  getMessages,
+  resolveLocale,
 } from "./i18n";
 import { buildRouteHref, parseRouteState } from "./route-state";
 import {
@@ -156,11 +156,7 @@ export function App() {
       matchesScope(item.path, scopeMode) &&
       pathBelongsToRepository(item.path, selectedRepositoryId, repositories),
   );
-  const routeInsights = buildRouteInsights(
-    visibleRouteFlow,
-    packages,
-    locale,
-  );
+  const routeInsights = buildRouteInsights(visibleRouteFlow, packages, locale);
   const searchWorkbench = buildSearchWorkbenchGuidance({
     locale,
     packages,
@@ -690,11 +686,15 @@ export function App() {
             </button>
             <div className="status-note">
               <span>{messages.app.workspaceLabel}</span>
-              <strong>{selectedWorkspace?.label ?? messages.common.loading}</strong>
+              <strong>
+                {selectedWorkspace?.label ?? messages.common.loading}
+              </strong>
             </div>
             <div className="status-note">
               <span>{messages.app.lastIndexLabel}</span>
-              <strong>{formatTimestamp(locale, status?.lastIndexRun?.completedAt)}</strong>
+              <strong>
+                {formatTimestamp(locale, status?.lastIndexRun?.completedAt)}
+              </strong>
             </div>
           </div>
         </header>
@@ -737,7 +737,9 @@ export function App() {
 
             <div className="meta-block">
               <span>{messages.app.repositoryLabel}</span>
-              <strong>{selectedRepository?.label ?? messages.common.loading}</strong>
+              <strong>
+                {selectedRepository?.label ?? messages.common.loading}
+              </strong>
             </div>
             <div className="meta-block">
               <span>{messages.app.repositoryRootLabel}</span>
@@ -747,7 +749,9 @@ export function App() {
             </div>
             <div className="meta-block">
               <span>{messages.app.workspaceRootLabel}</span>
-              <strong>{status?.workspaceRoot ?? messages.common.loading}</strong>
+              <strong>
+                {status?.workspaceRoot ?? messages.common.loading}
+              </strong>
             </div>
             <div className="meta-block">
               <span>{messages.app.dbPathLabel}</span>
@@ -755,7 +759,9 @@ export function App() {
             </div>
             <div className="meta-block">
               <span>{messages.app.modeLabel}</span>
-              <strong>{status?.lastIndexRun?.mode ?? messages.common.noneYet}</strong>
+              <strong>
+                {status?.lastIndexRun?.mode ?? messages.common.noneYet}
+              </strong>
             </div>
 
             <div className="panel-divider" />
@@ -788,7 +794,9 @@ export function App() {
             <div className="panel-divider" />
 
             <div className="panel-heading compact">
-              <span className="panel-kicker">{messages.app.packagesKicker}</span>
+              <span className="panel-kicker">
+                {messages.app.packagesKicker}
+              </span>
               <h2>{messages.app.routeFilterTitle}</h2>
             </div>
 
@@ -1035,7 +1043,9 @@ export function App() {
 
               <ul className="stack-list results-list">
                 {visibleRoutes.length === 0 ? (
-                  <li className="empty-state">{messages.app.noRoutesInScope}</li>
+                  <li className="empty-state">
+                    {messages.app.noRoutesInScope}
+                  </li>
                 ) : (
                   visibleRoutes.map((route) => {
                     const owningPackage = findOwningPackage(
@@ -1065,9 +1075,12 @@ export function App() {
                           </span>
                           <span className="route-meta-line">
                             <span>{route.framework}</span>
-                            <span>{formatConfidence(locale, route.confidence)}</span>
                             <span>
-                              {owningPackage?.label ?? messages.app.unmappedPackage}
+                              {formatConfidence(locale, route.confidence)}
+                            </span>
+                            <span>
+                              {owningPackage?.label ??
+                                messages.app.unmappedPackage}
                             </span>
                           </span>
                           <span className="list-meta">{route.filePath}</span>

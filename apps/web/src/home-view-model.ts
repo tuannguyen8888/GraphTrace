@@ -1,8 +1,4 @@
-import {
-  formatLocaleDateTime,
-  getMessages,
-  type Locale,
-} from "./i18n";
+import { type Locale, formatLocaleDateTime, getMessages } from "./i18n";
 
 export interface WorkspaceHomeSummary {
   id: string;

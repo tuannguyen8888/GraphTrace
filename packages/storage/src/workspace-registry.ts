@@ -53,11 +53,7 @@ export type WorkspaceJobType =
   | "rebuild"
   | "delete";
 
-export type WorkspaceJobStatus =
-  | "queued"
-  | "running"
-  | "completed"
-  | "failed";
+export type WorkspaceJobStatus = "queued" | "running" | "completed" | "failed";
 
 export interface WorkspaceJob {
   id: number;
@@ -78,7 +74,10 @@ export interface AddWorkspaceOptions {
 
 export interface WorkspaceRegistry {
   readonly dbPath: string;
-  addWorkspace(rootPath: string, options?: AddWorkspaceOptions): WorkspaceRecord;
+  addWorkspace(
+    rootPath: string,
+    options?: AddWorkspaceOptions,
+  ): WorkspaceRecord;
   listWorkspaces(): WorkspaceRecord[];
   getWorkspace(workspaceId: string): WorkspaceRecord | null;
   removeWorkspace(workspaceId: string): void;
@@ -174,7 +173,14 @@ class SqliteWorkspaceRegistry implements WorkspaceRegistry {
           options.pinned ? 1 : 0,
         );
 
-      return this.getWorkspace(identity.id)!;
+      const workspace = this.getWorkspace(identity.id);
+      if (!workspace) {
+        throw new Error(
+          `Workspace ${identity.id} was not persisted correctly.`,
+        );
+      }
+
+      return workspace;
     });
   }
 
@@ -224,13 +230,14 @@ class SqliteWorkspaceRegistry implements WorkspaceRegistry {
         lastIndexStartedAt:
           snapshot.lastIndexStartedAt ?? current?.lastIndexStartedAt ?? null,
         lastIndexCompletedAt:
-          snapshot.lastIndexCompletedAt ?? current?.lastIndexCompletedAt ?? null,
+          snapshot.lastIndexCompletedAt ??
+          current?.lastIndexCompletedAt ??
+          null,
         packageCount: snapshot.packageCount ?? current?.packageCount ?? 0,
         fileCount: snapshot.fileCount ?? current?.fileCount ?? 0,
         symbolCount: snapshot.symbolCount ?? current?.symbolCount ?? 0,
         routeCount: snapshot.routeCount ?? current?.routeCount ?? 0,
-        queryEdgeCount:
-          snapshot.queryEdgeCount ?? current?.queryEdgeCount ?? 0,
+        queryEdgeCount: snapshot.queryEdgeCount ?? current?.queryEdgeCount ?? 0,
         unitCount: snapshot.unitCount ?? current?.unitCount ?? 0,
         repositoryCount:
           snapshot.repositoryCount ?? current?.repositoryCount ?? 0,
@@ -282,7 +289,14 @@ class SqliteWorkspaceRegistry implements WorkspaceRegistry {
           merged.errorSummary,
         );
 
-      return this.getSnapshot(workspaceId)!;
+      const persistedSnapshot = this.getSnapshot(workspaceId);
+      if (!persistedSnapshot) {
+        throw new Error(
+          `Workspace snapshot for ${workspaceId} was not persisted correctly.`,
+        );
+      }
+
+      return persistedSnapshot;
     });
   }
 

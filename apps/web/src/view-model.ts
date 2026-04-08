@@ -1,7 +1,7 @@
 import type { DiscoveredUnit, RepositorySummary } from "@graphtrace/shared";
 import { pathBelongsToRepository } from "@graphtrace/shared";
 
-import { DEFAULT_LOCALE, getMessages, type Locale } from "./i18n";
+import { DEFAULT_LOCALE, type Locale, getMessages } from "./i18n";
 
 export interface IndexRunInfo {
   mode: string;
@@ -455,10 +455,7 @@ function scopeWeight(scope: ItemScope) {
   }
 }
 
-function describeSearchKind(
-  kind: string,
-  locale: Locale = DEFAULT_LOCALE,
-) {
+function describeSearchKind(kind: string, locale: Locale = DEFAULT_LOCALE) {
   const messages = getMessages(locale);
 
   switch (kind) {
