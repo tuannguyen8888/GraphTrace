@@ -22,10 +22,12 @@ import type {
   PositionedArchitectureGraphNode,
 } from "./architecture-graph";
 import { searchArchitectureGraphNodes } from "./architecture-graph";
+import { type Locale, getMessages } from "./i18n";
 
 import "@xyflow/react/dist/style.css";
 
 interface GraphWorkspaceProps {
+  locale: Locale;
   graph: ArchitectureGraphModel;
   nodes: PositionedArchitectureGraphNode[];
   onSelectNode: (node: ArchitectureGraphNode) => void;
@@ -52,6 +54,7 @@ export function GraphWorkspace(props: GraphWorkspaceProps) {
 }
 
 function GraphWorkspaceInner(props: GraphWorkspaceProps) {
+  const messages = getMessages(props.locale);
   const [flowNodes, setFlowNodes, onNodesChange] = useNodesState<GraphFlowNode>(
     [],
   );
@@ -118,10 +121,7 @@ function GraphWorkspaceInner(props: GraphWorkspaceProps) {
 
   if (props.graph.nodes.length === 0) {
     return (
-      <div className="empty-state graph-empty">
-        Chọn route, file, hoặc package trong inspector để xem bounded
-        architecture graph quanh selection đó.
-      </div>
+      <div className="empty-state graph-empty">{messages.graph.emptyState}</div>
     );
   }
 
@@ -134,11 +134,11 @@ function GraphWorkspaceInner(props: GraphWorkspaceProps) {
     >
       <div className="graph-workspace-toolbar">
         <label className="field grow">
-          <span>Search in graph</span>
+          <span>{messages.graph.searchLabel}</span>
           <input
             value={graphSearchText}
             onChange={(event) => setGraphSearchText(event.target.value)}
-            placeholder="route id, package, file path, query hint..."
+            placeholder={messages.graph.searchPlaceholder}
           />
         </label>
 
@@ -153,7 +153,7 @@ function GraphWorkspaceInner(props: GraphWorkspaceProps) {
               });
             }}
           >
-            Reset view
+            {messages.graph.resetView}
           </button>
           <button
             className="graph-filter"
@@ -171,7 +171,9 @@ function GraphWorkspaceInner(props: GraphWorkspaceProps) {
               await containerRef.current.requestFullscreen();
             }}
           >
-            {isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+            {isFullscreen
+              ? messages.graph.exitFullscreen
+              : messages.graph.fullscreen}
           </button>
         </div>
       </div>
@@ -180,7 +182,9 @@ function GraphWorkspaceInner(props: GraphWorkspaceProps) {
         <div className="graph-search-results">
           {searchMatches.length === 0 ? (
             <div className="graph-search-empty">
-              Không có node nào trên canvas khớp với "{graphSearchText}".
+              {messages.graph.noNodeMatch({
+                searchText: graphSearchText,
+              })}
             </div>
           ) : (
             searchMatches.map((match) => (
@@ -201,7 +205,8 @@ function GraphWorkspaceInner(props: GraphWorkspaceProps) {
                 <span className="list-chip">{match.kind}</span>
                 <span className="list-title">{match.label}</span>
                 <span className="list-subtle">
-                  {match.path ?? `${match.cluster} node`}
+                  {match.path ??
+                    `${match.cluster} ${messages.graph.clusterNode}`}
                 </span>
               </button>
             ))

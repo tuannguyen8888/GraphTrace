@@ -6,6 +6,14 @@ import {
   resolveRepositoryForPath,
 } from "@graphtrace/shared";
 
+import {
+  type WorkspaceHomeSummary,
+  buildWorkspaceCards,
+} from "../../../apps/web/src/home-view-model";
+import {
+  buildRouteHref,
+  parseRouteState,
+} from "../../../apps/web/src/route-state";
 import type {
   GraphItem,
   PackageSummary,
@@ -151,6 +159,97 @@ const units: DiscoveredUnit[] = [
   },
 ];
 
+const monorepoUnits: DiscoveredUnit[] = [
+  {
+    id: "unit:root",
+    rootPath: ".",
+    displayName: "tawaco",
+    kind: "project",
+    language: "unknown",
+    tooling: "pnpm",
+    indexingMode: "shallow",
+    confidence: 100,
+    signals: [],
+    sourceRoots: ["apps", "src"],
+    pluginMatches: [],
+  },
+  {
+    id: "unit:apps",
+    rootPath: "apps",
+    displayName: "apps",
+    kind: "subproject",
+    language: "js-ts",
+    tooling: "pnpm",
+    indexingMode: "shallow",
+    confidence: 80,
+    signals: [],
+    sourceRoots: ["apps"],
+    parentUnitId: "unit:root",
+    pluginMatches: [],
+  },
+  {
+    id: "unit:apps/backoffice",
+    rootPath: "apps/backoffice",
+    displayName: "web",
+    kind: "app",
+    language: "js-ts",
+    tooling: "pnpm",
+    indexingMode: "full",
+    confidence: 95,
+    signals: [],
+    sourceRoots: ["apps/backoffice/src"],
+    parentUnitId: "unit:apps",
+    pluginMatches: [],
+  },
+  {
+    id: "unit:apps/kiosk",
+    rootPath: "apps/kiosk",
+    displayName: "web",
+    kind: "app",
+    language: "js-ts",
+    tooling: "pnpm",
+    indexingMode: "full",
+    confidence: 95,
+    signals: [],
+    sourceRoots: ["apps/kiosk/src"],
+    parentUnitId: "unit:apps",
+    pluginMatches: [],
+  },
+];
+
+const workspaces: WorkspaceHomeSummary[] = [
+  {
+    id: "graphtrace-123abc",
+    label: "GraphTrace",
+    canonicalRootPath: "/tmp/GraphTrace",
+    status: "ready",
+    dbPath: "/tmp/.graphtrace/workspaces/graphtrace-123abc/index.db",
+    snapshot: {
+      packageCount: 8,
+      fileCount: 56,
+      symbolCount: 312,
+      routeCount: 4,
+      queryEdgeCount: 18,
+      lastIndexCompletedAt: "2026-04-07T20:00:00.000Z",
+    },
+  },
+  {
+    id: "tawaco-987def",
+    label: "tawaco",
+    canonicalRootPath: "/tmp/tawaco",
+    status: "indexing",
+    dbPath: "/tmp/.graphtrace/workspaces/tawaco-987def/index.db",
+    snapshot: {
+      packageCount: 3,
+      fileCount: 81,
+      symbolCount: 534,
+      routeCount: 0,
+      queryEdgeCount: 0,
+      lastIndexCompletedAt: null,
+    },
+  },
+];
+
 describe("web ui view-model", () => {
   test("derives explicit repositories from workspace units and resolves paths against them", () => {
     const repositories = deriveRepositories(units);
@@ -190,6 +289,29 @@ describe("web ui view-model", () => {
       ),
     ).toBe(true);
     expect(matchesScope("packages/cli/test/cli.test.ts", "tests")).toBe(true);
+  });
+
+  test("promotes nested app scopes as repository candidates and disambiguates duplicate labels", () => {
+    const repositories = deriveRepositories(monorepoUnits);
+
+    expect(repositories.map((entry) => entry.id)).toEqual([
+      ".",
+      "apps/backoffice",
+      "apps/kiosk",
+    ]);
+    expect(
+      repositories.find((entry) => entry.id === "apps/backoffice")?.label,
+    ).toBe("web · apps/backoffice");
+    expect(repositories.find((entry) => entry.id === "apps/kiosk")?.label).toBe(
+      "web · apps/kiosk",
+    );
+    expect(
+      resolveRepositoryForPath("apps/backoffice/src/main.tsx", repositories)
+        ?.id,
+    ).toBe("apps/backoffice");
+    expect(
+      resolveRepositoryForPath("apps/kiosk/src/main.tsx", repositories)?.id,
+    ).toBe("apps/kiosk");
   });
 
   test("builds package entries with disambiguation for duplicate labels", () => {
@@ -271,6 +393,7 @@ describe("web ui view-model", () => {
   test("builds guided search quick picks for first-run repo triage", () => {
     const repositories = deriveRepositories(units);
     const guidance = buildSearchWorkbenchGuidance({
+      locale: "en",
       packages,
       routes,
       repositories,
@@ -297,6 +420,7 @@ describe("web ui view-model", () => {
   test("adapts guided search quick picks when scope and package change", () => {
     const repositories = deriveRepositories(units);
     const packageScoped = buildSearchWorkbenchGuidance({
+      locale: "en",
       packages,
       routes,
       repositories,
@@ -306,6 +430,7 @@ describe("web ui view-model", () => {
       searchKind: "route",
     });
     const testsScoped = buildSearchWorkbenchGuidance({
+      locale: "vi",
       packages,
       routes,
       repositories,
@@ -327,6 +452,7 @@ describe("web ui view-model", () => {
     ]);
     expect(packageScoped.kindGuide).toContain("HTTP");
     expect(testsScoped.emptyStateTitle).toContain("Bắt đầu");
+    expect(testsScoped.kindGuide).toContain("Route search");
   });
 
   test("derives route insights for related packages and query hints", () => {
@@ -393,5 +519,71 @@ describe("web ui view-model", () => {
     ).toBe(
       'graphtrace deps "packages/indexer/src/workspace.ts" --direction both --depth 2',
     );
+  });
+
+  test("builds workspace cards for the home screen with status-aware summaries", () => {
+    const cards = buildWorkspaceCards(workspaces, "en");
+    const viCards = buildWorkspaceCards(workspaces, "vi");
+
+    expect(cards).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "graphtrace-123abc",
+          statusTone: "ready",
+          metricSummary: "8 packages · 56 files · 4 routes",
+        }),
+        expect.objectContaining({
+          id: "tawaco-987def",
+          statusTone: "indexing",
+          statusLabel: "Indexing",
+        }),
+      ]),
+    );
+    expect(cards[1]?.timestampLabel).toBe("Indexing workspace...");
+    expect(viCards[1]?.statusLabel).toBe("Đang lập chỉ mục");
+    expect(viCards[1]?.timestampLabel).toBe("Đang lập chỉ mục workspace...");
+    expect(cards[0]?.subline).toContain("/tmp/GraphTrace");
+  });
+
+  test("parses and rebuilds workspace detail routes with inner filters", () => {
+    const state = parseRouteState(
+      "http://127.0.0.1:4310/workspaces/graphtrace-123abc?repository=packages/server&scope=all&package=package%3Apackages%2Fserver&q=runCli&kind=symbol&lang=vi",
+    );
+
+    expect(state).toEqual(
+      expect.objectContaining({
+        workspaceId: "graphtrace-123abc",
+        repositoryId: "packages/server",
+        scopeMode: "all",
+        selectedPackageId: "package:packages/server",
+        searchText: "runCli",
+        searchKind: "symbol",
+        locale: "vi",
+      }),
+    );
+    expect(
+      buildRouteHref({
+        workspaceId: "graphtrace-123abc",
+        repositoryId: "packages/server",
+        scopeMode: "all",
+        selectedPackageId: "package:packages/server",
+        searchText: "runCli",
+        searchKind: "symbol",
+        locale: "vi",
+      }),
+    ).toBe(
+      "/workspaces/graphtrace-123abc?repository=packages%2Fserver&scope=all&package=package%3Apackages%2Fserver&q=runCli&kind=symbol&lang=vi",
+    );
+    expect(
+      buildRouteHref({
+        workspaceId: "",
+        repositoryId: ".",
+        scopeMode: "primary",
+        selectedPackageId: "",
+        searchText: "",
+        searchKind: "symbol",
+        locale: "vi",
+      }),
+    ).toBe("/?lang=vi");
   });
 });

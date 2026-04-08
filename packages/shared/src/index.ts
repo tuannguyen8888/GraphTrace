@@ -150,6 +150,9 @@ export interface IndexWorkspaceOptions {
   full?: boolean;
   changedFiles?: string[];
   removedFiles?: string[];
+  dbPath?: string;
+  persistWorkspaceArtifacts?: boolean;
+  configOverrides?: Partial<GraphTraceConfig>;
 }
 
 export interface IndexWorkspaceResult {
@@ -216,19 +219,48 @@ export function deriveRepositories(
       displayName: "Primary workspace",
     } as const);
 
-  const nestedRepositories = units
+  const nestedRepositoryCandidates = units
     .filter(
       (unit) =>
         unit.rootPath !== "." &&
-        unit.parentUnitId === rootUnit.id &&
         (unit.kind === "project" ||
           unit.kind === "subproject" ||
-          unit.kind === "repo"),
+          unit.kind === "repo" ||
+          unit.kind === "app" ||
+          unit.kind === "service"),
     )
+    .sort((left, right) => right.rootPath.length - left.rootPath.length);
+  const keptUnits: DiscoveredUnit[] = [];
+
+  for (const unit of nestedRepositoryCandidates) {
+    const shadowedByMoreSpecificUnit = keptUnits.some(
+      (entry) =>
+        entry.rootPath === unit.rootPath ||
+        entry.rootPath.startsWith(`${unit.rootPath}/`),
+    );
+
+    if (!shadowedByMoreSpecificUnit) {
+      keptUnits.push(unit);
+    }
+  }
+
+  const labelCounts = new Map<string, number>();
+
+  for (const unit of keptUnits) {
+    labelCounts.set(
+      unit.displayName,
+      (labelCounts.get(unit.displayName) ?? 0) + 1,
+    );
+  }
+
+  const nestedRepositories = keptUnits
     .map((unit) => ({
       id: unit.rootPath,
       rootPath: unit.rootPath,
-      label: unit.displayName,
+      label:
+        (labelCounts.get(unit.displayName) ?? 0) > 1
+          ? `${unit.displayName} · ${unit.rootPath}`
+          : unit.displayName,
       kind: "nested" as const,
       sourceUnitId: unit.id,
     }))

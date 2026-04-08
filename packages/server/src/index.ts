@@ -8,6 +8,7 @@ import {
   type createQueryEngine,
   withWorkspaceQueryEngine,
 } from "@graphtrace/query-engine";
+import type { GraphTraceDaemon } from "./daemon";
 
 export interface GraphTraceServer {
   address: string;
@@ -15,7 +16,8 @@ export interface GraphTraceServer {
 }
 
 interface GraphTraceServerOptions {
-  workspaceRoot: string;
+  workspaceRoot?: string;
+  daemon?: GraphTraceDaemon;
 }
 
 interface StartGraphTraceServerOptions extends GraphTraceServerOptions {
@@ -70,11 +72,105 @@ export function createGraphTraceApp(
   options: GraphTraceServerOptions,
 ): FastifyInstance {
   const app = Fastify();
-  const withQueryEngine = <T>(
-    action: (engine: ReturnType<typeof createQueryEngine>, dbPath: string) => T,
-  ) => withWorkspaceQueryEngine(options.workspaceRoot, action);
+  const daemon = options.daemon;
+  const workspaceRoot = options.workspaceRoot;
 
   app.get("/health", async () => ({ ok: true }));
+  if (workspaceRoot) {
+    registerSingleWorkspaceRoutes(app, workspaceRoot, (action) =>
+      withWorkspaceQueryEngine(workspaceRoot, action),
+    );
+  }
+  registerWorkspaceScopedRoutes(app, daemon);
+  app.get("/assets/*", async (request, reply) => {
+    const rawPath = String((request.params as { "*": string })["*"] ?? "");
+    const assetPath = normalize(rawPath).replace(/^(\.\.(\/|\\|$))+/, "");
+    const asset = await readBuiltWebFile(["assets", assetPath]);
+
+    if (!asset) {
+      reply.code(404);
+      return { error: "asset_not_found" };
+    }
+
+    reply.header("content-type", asset.contentType);
+    return asset.body;
+  });
+  app.get("/", async (_request, reply) => {
+    const html = await readBuiltWebFile(["index.html"]);
+
+    if (!html || typeof html.body !== "string") {
+      reply.code(503);
+      reply.header("content-type", "text/plain; charset=utf-8");
+      return "GraphTrace web assets are missing. Run `pnpm web:build` before starting the web server.";
+    }
+
+    reply.header("content-type", html.contentType);
+    return html.body;
+  });
+  app.setNotFoundHandler(async (request, reply) => {
+    if (!shouldServeSpaShell(request.url)) {
+      reply.code(404);
+      return {
+        message: `Route ${request.method}:${request.url} not found`,
+        error: "Not Found",
+        statusCode: 404,
+      };
+    }
+
+    const html = await readBuiltWebFile(["index.html"]);
+
+    if (!html || typeof html.body !== "string") {
+      reply.code(503);
+      reply.header("content-type", "text/plain; charset=utf-8");
+      return "GraphTrace web assets are missing. Run `pnpm web:build` before starting the web server.";
+    }
+
+    reply.header("content-type", html.contentType);
+    return html.body;
+  });
+
+  return app;
+}
+
+function shouldServeSpaShell(url: string): boolean {
+  const pathname = url.split("?", 1)[0] || "/";
+
+  if (
+    pathname === "/" ||
+    pathname === "/health" ||
+    pathname.startsWith("/api") ||
+    pathname.startsWith("/assets/")
+  ) {
+    return false;
+  }
+
+  return extname(pathname) === "";
+}
+
+export async function startGraphTraceServer(
+  options: StartGraphTraceServerOptions,
+): Promise<GraphTraceServer> {
+  const app = createGraphTraceApp(options);
+  const address = await app.listen({ host: "127.0.0.1", port: options.port });
+  return {
+    address,
+    close: async () => {
+      await app.close();
+    },
+  };
+}
+
+function registerSingleWorkspaceRoutes(
+  app: FastifyInstance,
+  workspaceRoot: string | undefined,
+  withQueryEngine: <T>(
+    action: (engine: ReturnType<typeof createQueryEngine>, dbPath: string) => T,
+  ) => T,
+): void {
+  if (!workspaceRoot) {
+    return;
+  }
+
   app.get("/api/repositories", async () => {
     return withQueryEngine((engine) => engine.repositories());
   });
@@ -82,8 +178,8 @@ export function createGraphTraceApp(
     const { repository } = request.query as { repository?: string };
     return withQueryEngine((engine, dbPath) =>
       repository
-        ? engine.statusByRepository(options.workspaceRoot, dbPath, repository)
-        : engine.status(options.workspaceRoot, dbPath),
+        ? engine.statusByRepository(workspaceRoot, dbPath, repository)
+        : engine.status(workspaceRoot, dbPath),
     );
   });
   app.get("/api/search", async (request) => {
@@ -192,45 +288,191 @@ export function createGraphTraceApp(
         : engine.flow(target, depth ? Number(depth) : undefined),
     );
   });
-  app.get("/assets/*", async (request, reply) => {
-    const rawPath = String((request.params as { "*": string })["*"] ?? "");
-    const assetPath = normalize(rawPath).replace(/^(\.\.(\/|\\|$))+/, "");
-    const asset = await readBuiltWebFile(["assets", assetPath]);
+}
 
-    if (!asset) {
+function registerWorkspaceScopedRoutes(
+  app: FastifyInstance,
+  daemon: GraphTraceDaemon | undefined,
+): void {
+  if (!daemon) {
+    return;
+  }
+
+  app.get("/api/workspaces", async () => ({
+    items: daemon.listWorkspaceSummaries(),
+  }));
+
+  app.post("/api/workspaces", async (request, reply) => {
+    const body = (request.body ?? {}) as {
+      rootPath?: string;
+      label?: string;
+    };
+
+    if (!body.rootPath?.trim()) {
+      reply.code(400);
+      return {
+        error: "root_path_required",
+      };
+    }
+
+    const workspace = await daemon.addWorkspace(body.rootPath, {
+      label: body.label?.trim() || undefined,
+    });
+    reply.code(201);
+    return workspace;
+  });
+
+  app.delete("/api/workspaces/:workspaceId", async (request, reply) => {
+    const { workspaceId } = request.params as { workspaceId: string };
+    const workspace = daemon.getWorkspace(workspaceId);
+
+    if (!workspace) {
       reply.code(404);
-      return { error: "asset_not_found" };
+      return {
+        error: "workspace_not_found",
+      };
     }
 
-    reply.header("content-type", asset.contentType);
-    return asset.body;
-  });
-  app.get("/", async (_request, reply) => {
-    const html = await readBuiltWebFile(["index.html"]);
-
-    if (!html || typeof html.body !== "string") {
-      reply.code(503);
-      reply.header("content-type", "text/plain; charset=utf-8");
-      return "GraphTrace web assets are missing. Run `pnpm web:build` before starting the web server.";
-    }
-
-    reply.header("content-type", html.contentType);
-    return html.body;
+    daemon.removeWorkspace(workspaceId);
+    return {
+      ok: true,
+    };
   });
 
-  return app;
+  app.get("/api/workspaces/:workspaceId/repositories", async (request) => {
+    const { workspaceId } = request.params as { workspaceId: string };
+    return daemon.withWorkspaceQueryEngine(workspaceId, (engine) =>
+      engine.repositories(),
+    );
+  });
+
+  app.get("/api/workspaces/:workspaceId/status", async (request) => {
+    const { workspaceId } = request.params as { workspaceId: string };
+    const { repository } = request.query as { repository?: string };
+    return daemon.status(workspaceId, repository);
+  });
+
+  app.get("/api/workspaces/:workspaceId/search", async (request) => {
+    const { workspaceId } = request.params as { workspaceId: string };
+    const { q, kind, repository } = request.query as {
+      q?: string;
+      kind?: string;
+      repository?: string;
+    };
+
+    return daemon.withWorkspaceQueryEngine(workspaceId, (engine) =>
+      repository
+        ? engine.searchByRepository(
+            repository,
+            String(q ?? ""),
+            kind || undefined,
+          )
+        : engine.search(String(q ?? ""), kind || undefined),
+    );
+  });
+
+  app.get("/api/workspaces/:workspaceId/routes", async (request) => {
+    const { workspaceId } = request.params as { workspaceId: string };
+    const { package: packageName, repository } = request.query as {
+      package?: string;
+      repository?: string;
+    };
+
+    return daemon.withWorkspaceQueryEngine(workspaceId, (engine) =>
+      repository
+        ? engine.routesByRepository(repository, packageName || undefined)
+        : engine.routes(packageName || undefined),
+    );
+  });
+
+  app.get("/api/workspaces/:workspaceId/packages", async (request) => {
+    const { workspaceId } = request.params as { workspaceId: string };
+    const { repository } = request.query as {
+      repository?: string;
+    };
+
+    return daemon.withWorkspaceQueryEngine(workspaceId, (engine) =>
+      repository
+        ? engine.listPackagesByRepository(repository)
+        : engine.listPackages(),
+    );
+  });
+
+  app.get("/api/workspaces/:workspaceId/deps", async (request) => {
+    const { workspaceId } = request.params as { workspaceId: string };
+    const {
+      target = "",
+      direction = "both",
+      depth,
+      repository,
+    } = request.query as {
+      target?: string;
+      direction?: "in" | "out" | "both";
+      depth?: string;
+      repository?: string;
+    };
+
+    return daemon.withWorkspaceQueryEngine(workspaceId, (engine) =>
+      repository
+        ? engine.dependenciesByRepository(
+            repository,
+            target,
+            direction,
+            depth ? Number(depth) : undefined,
+          )
+        : engine.dependencies(
+            target,
+            direction,
+            depth ? Number(depth) : undefined,
+          ),
+    );
+  });
+
+  app.get("/api/workspaces/:workspaceId/impact", async (request) => {
+    const { workspaceId } = request.params as { workspaceId: string };
+    const {
+      target = "",
+      depth,
+      repository,
+    } = request.query as {
+      target?: string;
+      depth?: string;
+      repository?: string;
+    };
+
+    return daemon.withWorkspaceQueryEngine(workspaceId, (engine) =>
+      repository
+        ? engine.impactByRepository(
+            repository,
+            target,
+            depth ? Number(depth) : undefined,
+          )
+        : engine.impact(target, depth ? Number(depth) : undefined),
+    );
+  });
+
+  app.get("/api/workspaces/:workspaceId/flow", async (request) => {
+    const { workspaceId } = request.params as { workspaceId: string };
+    const {
+      target = "",
+      depth,
+      repository,
+    } = request.query as {
+      target?: string;
+      depth?: string;
+      repository?: string;
+    };
+
+    return daemon.withWorkspaceQueryEngine(workspaceId, (engine) =>
+      repository
+        ? engine.flowByRepository(
+            repository,
+            target,
+            depth ? Number(depth) : undefined,
+          )
+        : engine.flow(target, depth ? Number(depth) : undefined),
+    );
+  });
 }
 
-export async function startGraphTraceServer(
-  options: StartGraphTraceServerOptions,
-): Promise<GraphTraceServer> {
-  const app = createGraphTraceApp(options);
-
-  await app.listen({ host: "127.0.0.1", port: options.port });
-  return {
-    address: `http://127.0.0.1:${options.port}`,
-    close: async () => {
-      await app.close();
-    },
-  };
-}
+export * from "./daemon";

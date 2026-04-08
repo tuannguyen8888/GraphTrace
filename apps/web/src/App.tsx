@@ -1,14 +1,46 @@
-import { startTransition, useDeferredValue, useEffect, useState } from "react";
+import {
+  type FormEvent,
+  startTransition,
+  useDeferredValue,
+  useEffect,
+  useState,
+} from "react";
 
 import type { RepositorySummary } from "@graphtrace/shared";
 import { pathBelongsToRepository } from "@graphtrace/shared";
 
+import {
+  addWorkspace,
+  getFileDependencies,
+  getFileImpact,
+  getRouteFlow,
+  getWorkspacePackages,
+  getWorkspaceRepositories,
+  getWorkspaceRoutes,
+  getWorkspaceStatus,
+  getWorkspaces,
+  searchWorkspace,
+} from "./api-client";
 import {
   type GraphEdgeFilters,
   buildArchitectureGraph,
   layoutArchitectureGraph,
 } from "./architecture-graph";
 import { GraphWorkspace } from "./graph-workspace";
+import {
+  type WorkspaceHomeSummary,
+  buildWorkspaceCards,
+} from "./home-view-model";
+import {
+  DEFAULT_LOCALE,
+  LOCALE_STORAGE_KEY,
+  type Locale,
+  SUPPORTED_LOCALES,
+  formatLocaleDateTime,
+  getMessages,
+  resolveLocale,
+} from "./i18n";
+import { buildRouteHref, parseRouteState } from "./route-state";
 import {
   type GraphItem,
   type PackageListEntry,
@@ -28,39 +60,23 @@ import {
   looksLikeSourcePath,
   matchesScope,
 } from "./view-model";
+import { WorkspaceHome } from "./workspace-home";
 
 type InspectorMode =
   | { type: "idle" }
   | { type: "route"; route: RouteSummary }
   | { type: "search"; item: SearchResult };
 
-const scopeOptions: Array<{
-  id: ScopeMode;
-  label: string;
-  description: string;
-}> = [
-  {
-    id: "primary",
-    label: "Primary workspace",
-    description: "Ẩn fixtures và test-only noise để repo chính nổi bật hơn.",
-  },
-  {
-    id: "all",
-    label: "Include fixtures",
-    description: "Hiện toàn bộ packages, routes, và search hits.",
-  },
-  {
-    id: "tests",
-    label: "Tests only",
-    description: "Tập trung vào fixtures và các file test.",
-  },
-];
-
 export function App() {
+  const [locale, setLocale] = useState<Locale>(() => readLocaleFromLocation());
+  const [workspaces, setWorkspaces] = useState<WorkspaceHomeSummary[]>([]);
   const [status, setStatus] = useState<WorkspaceStatus | null>(null);
   const [repositories, setRepositories] = useState<RepositorySummary[]>([]);
   const [packages, setPackages] = useState<PackageSummary[]>([]);
   const [routes, setRoutes] = useState<RouteSummary[]>([]);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(() =>
+    readWorkspaceFromLocation(),
+  );
   const [selectedRepositoryId, setSelectedRepositoryId] = useState(() =>
     readRepositoryFromLocation(),
   );
@@ -92,7 +108,15 @@ export function App() {
   const [impactItems, setImpactItems] = useState<GraphItem[]>([]);
   const [workspaceError, setWorkspaceError] = useState("");
   const [refreshNonce, setRefreshNonce] = useState(0);
+  const [draftRootPath, setDraftRootPath] = useState("");
+  const [draftLabel, setDraftLabel] = useState("");
+  const [addingWorkspace, setAddingWorkspace] = useState(false);
   const deferredSearchText = useDeferredValue(searchText);
+  const messages = getMessages(locale);
+  const scopeOptions = buildScopeOptions(locale);
+  const workspaceCards = buildWorkspaceCards(workspaces, locale);
+  const selectedWorkspace =
+    workspaces.find((entry) => entry.id === selectedWorkspaceId) ?? null;
 
   const selectedRepository =
     repositories.find((entry) => entry.id === selectedRepositoryId) ??
@@ -103,6 +127,7 @@ export function App() {
     scopeMode,
     repositories,
     selectedRepositoryId,
+    locale,
   );
   const visibleRoutes = filterRoutesForDisplay(routes, packages, {
     repositories,
@@ -131,8 +156,9 @@ export function App() {
       matchesScope(item.path, scopeMode) &&
       pathBelongsToRepository(item.path, selectedRepositoryId, repositories),
   );
-  const routeInsights = buildRouteInsights(visibleRouteFlow, packages);
+  const routeInsights = buildRouteInsights(visibleRouteFlow, packages, locale);
   const searchWorkbench = buildSearchWorkbenchGuidance({
+    locale,
     packages,
     routes,
     repositories,
@@ -168,8 +194,8 @@ export function App() {
         : "";
   const selectedSummary =
     inspector.type === "route"
-      ? `${inspector.route.framework} · ${formatConfidence(inspector.route.confidence)}`
-      : (selectedPath ?? "Không có file path để trace.");
+      ? `${inspector.route.framework} · ${formatConfidence(locale, inspector.route.confidence)}`
+      : (selectedPath ?? messages.app.noFilePathToTrace);
   const selectedCommand =
     inspector.type === "idle"
       ? ""
@@ -191,12 +217,60 @@ export function App() {
   useEffect(() => {
     let cancelled = false;
 
+    const loadWorkspaces = async () => {
+      try {
+        const payload = await getWorkspaces(refreshNonce);
+
+        if (cancelled) {
+          return;
+        }
+
+        startTransition(() => {
+          setWorkspaces(payload.items ?? []);
+          if (
+            selectedWorkspaceId &&
+            !(payload.items ?? []).some(
+              (entry) => entry.id === selectedWorkspaceId,
+            )
+          ) {
+            setSelectedWorkspaceId("");
+          }
+        });
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        startTransition(() => {
+          setWorkspaceError(
+            error instanceof Error
+              ? error.message
+              : messages.app.loadWorkspacesError,
+          );
+        });
+      }
+    };
+
+    void loadWorkspaces();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [messages.app.loadWorkspacesError, refreshNonce, selectedWorkspaceId]);
+
+  useEffect(() => {
+    if (!selectedWorkspaceId) {
+      return;
+    }
+
+    let cancelled = false;
+
     const loadWorkspaceData = async () => {
       try {
-        const refreshQuery = buildRefreshQuery(refreshNonce);
-        const repositoriesPayload = await fetchJson<
-          QueryResult<RepositorySummary>
-        >(`/api/repositories${refreshQuery}`);
+        const repositoriesPayload = await getWorkspaceRepositories(
+          selectedWorkspaceId,
+          refreshNonce,
+        );
         const availableRepositories = repositoriesPayload.items ?? [];
         const nextRepositoryId =
           availableRepositories.find(
@@ -204,18 +278,22 @@ export function App() {
           )?.id ??
           availableRepositories[0]?.id ??
           ".";
-        const repositoryQuery = buildRepositoryQuery(nextRepositoryId);
-        const refreshSuffix = buildRefreshQuery(refreshNonce, true);
         const [statusPayload, packagesPayload, routesPayload] =
           await Promise.all([
-            fetchJson<WorkspaceStatus>(
-              `/api/status${repositoryQuery}${refreshSuffix}`,
+            getWorkspaceStatus(
+              selectedWorkspaceId,
+              refreshNonce,
+              nextRepositoryId,
             ),
-            fetchJson<QueryResult<PackageSummary>>(
-              `/api/packages${repositoryQuery}${refreshSuffix}`,
+            getWorkspacePackages(
+              selectedWorkspaceId,
+              refreshNonce,
+              nextRepositoryId,
             ),
-            fetchJson<QueryResult<RouteSummary>>(
-              `/api/routes${repositoryQuery}${refreshSuffix}`,
+            getWorkspaceRoutes(
+              selectedWorkspaceId,
+              refreshNonce,
+              nextRepositoryId,
             ),
           ]);
 
@@ -240,7 +318,7 @@ export function App() {
           setWorkspaceError(
             error instanceof Error
               ? error.message
-              : "Không tải được workspace state.",
+              : messages.app.loadWorkspaceStateError,
           );
           setRepositories([]);
           setPackages([]);
@@ -254,23 +332,25 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [refreshNonce, selectedRepositoryId]);
+  }, [
+    messages.app.loadWorkspaceStateError,
+    refreshNonce,
+    selectedRepositoryId,
+    selectedWorkspaceId,
+  ]);
 
   useEffect(() => {
-    if (!deferredSearchText.trim()) {
+    if (!selectedWorkspaceId || !deferredSearchText.trim()) {
       setSearchResults([]);
       return;
     }
 
-    const query = new URLSearchParams({
-      q: deferredSearchText,
-      kind: searchKind,
-    });
-    if (selectedRepositoryId) {
-      query.set("repository", selectedRepositoryId);
-    }
-
-    void fetchJson<QueryResult<SearchResult>>(`/api/search?${query.toString()}`)
+    void searchWorkspace(
+      selectedWorkspaceId,
+      deferredSearchText,
+      searchKind,
+      selectedRepositoryId,
+    )
       .then((payload) => {
         startTransition(() => {
           setSearchResults(payload.items ?? []);
@@ -281,10 +361,15 @@ export function App() {
           setSearchResults([]);
         });
       });
-  }, [deferredSearchText, searchKind, selectedRepositoryId]);
+  }, [
+    deferredSearchText,
+    searchKind,
+    selectedRepositoryId,
+    selectedWorkspaceId,
+  ]);
 
   useEffect(() => {
-    if (inspector.type === "idle") {
+    if (!selectedWorkspaceId || inspector.type === "idle") {
       return;
     }
 
@@ -293,13 +378,14 @@ export function App() {
     const loadInspector = async () => {
       setDetailLoading(true);
       setDetailError("");
-      const repositoryQuery = buildRepositoryQuery(selectedRepositoryId, true);
-      const refreshSuffix = buildRefreshQuery(refreshNonce, true);
 
       try {
         if (inspector.type === "route") {
-          const flowPayload = await fetchJson<QueryResult<GraphItem>>(
-            `/api/flow?target=${encodeURIComponent(inspector.route.id)}${repositoryQuery}${refreshSuffix}`,
+          const flowPayload = await getRouteFlow(
+            selectedWorkspaceId,
+            inspector.route.id,
+            refreshNonce,
+            selectedRepositoryId,
           );
 
           if (cancelled) {
@@ -316,11 +402,17 @@ export function App() {
           looksLikeSourcePath(inspector.item.path)
         ) {
           const [depsPayload, impactPayload] = await Promise.all([
-            fetchJson<QueryResult<GraphItem>>(
-              `/api/deps?target=${encodeURIComponent(inspector.item.path)}&direction=both&depth=2${repositoryQuery}${refreshSuffix}`,
+            getFileDependencies(
+              selectedWorkspaceId,
+              inspector.item.path,
+              refreshNonce,
+              selectedRepositoryId,
             ),
-            fetchJson<QueryResult<GraphItem>>(
-              `/api/impact?target=${encodeURIComponent(inspector.item.path)}&depth=4${repositoryQuery}${refreshSuffix}`,
+            getFileImpact(
+              selectedWorkspaceId,
+              inspector.item.path,
+              refreshNonce,
+              selectedRepositoryId,
             ),
           ]);
 
@@ -349,7 +441,7 @@ export function App() {
           setDetailError(
             error instanceof Error
               ? error.message
-              : "Không tải được inspector.",
+              : messages.app.loadInspectorError,
           );
           setRouteFlow([]);
           setDependencyItems([]);
@@ -369,7 +461,13 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [inspector, refreshNonce, selectedRepositoryId]);
+  }, [
+    inspector,
+    messages.app.loadInspectorError,
+    refreshNonce,
+    selectedRepositoryId,
+    selectedWorkspaceId,
+  ]);
 
   useEffect(() => {
     if (!selectedPackageId) {
@@ -400,6 +498,8 @@ export function App() {
 
   useEffect(() => {
     syncUiStateToLocation({
+      locale,
+      workspaceId: selectedWorkspaceId,
       repositoryId: selectedRepositoryId,
       scopeMode,
       selectedPackageId,
@@ -407,12 +507,84 @@ export function App() {
       searchText,
     });
   }, [
+    locale,
     scopeMode,
     searchKind,
     searchText,
     selectedPackageId,
     selectedRepositoryId,
+    selectedWorkspaceId,
   ]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.localStorage.setItem(LOCALE_STORAGE_KEY, locale);
+  }, [locale]);
+
+  const handleAddWorkspace = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setAddingWorkspace(true);
+
+    try {
+      const created = await addWorkspace({
+        rootPath: draftRootPath,
+        label: draftLabel || undefined,
+      });
+
+      startTransition(() => {
+        setDraftRootPath("");
+        setDraftLabel("");
+        setSelectedWorkspaceId(created.id);
+        setSelectedRepositoryId(".");
+        setSelectedPackageId("");
+        setSearchText("");
+        setSearchResults([]);
+        setInspector({ type: "idle" });
+        setRefreshNonce((value) => value + 1);
+        setWorkspaceError("");
+      });
+    } catch (error) {
+      startTransition(() => {
+        setWorkspaceError(
+          error instanceof Error
+            ? error.message
+            : messages.app.addWorkspaceError,
+        );
+      });
+    } finally {
+      setAddingWorkspace(false);
+    }
+  };
+
+  if (!selectedWorkspaceId) {
+    return (
+      <WorkspaceHome
+        locale={locale}
+        cards={workspaceCards}
+        workspaceError={workspaceError}
+        addingWorkspace={addingWorkspace}
+        draftRootPath={draftRootPath}
+        draftLabel={draftLabel}
+        onLocaleChange={setLocale}
+        onDraftRootPathChange={setDraftRootPath}
+        onDraftLabelChange={setDraftLabel}
+        onAddWorkspace={handleAddWorkspace}
+        onOpenWorkspace={(workspaceId) => {
+          startTransition(() => {
+            setSelectedWorkspaceId(workspaceId);
+            setSelectedRepositoryId(".");
+            setSelectedPackageId("");
+            setSearchText("");
+            setSearchResults([]);
+            setInspector({ type: "idle" });
+          });
+        }}
+      />
+    );
+  }
 
   const relatedPackageItems = routeInsights.relatedPackages.map((entry) => ({
     id: entry.id,
@@ -426,18 +598,57 @@ export function App() {
       <section className="app-frame">
         <header className="command-deck">
           <div className="command-copy">
-            <span className="eyebrow">LOCAL-FIRST CODE GRAPH</span>
+            {selectedWorkspace ? (
+              <div className="workspace-breadcrumb">
+                <button
+                  className="ghost-button"
+                  type="button"
+                  onClick={() => {
+                    startTransition(() => {
+                      setSelectedWorkspaceId("");
+                    });
+                  }}
+                >
+                  {messages.app.workspaceListLabel}
+                </button>
+                <span>/</span>
+                <strong>{selectedWorkspace.label}</strong>
+              </div>
+            ) : null}
+            <span className="eyebrow">{messages.app.eyebrow}</span>
             <h1>GraphTrace</h1>
-            <p>
-              Search code, inspect routes, and keep drilling from files,
-              dependencies, impact, and flow without falling back to repo-wide
-              scans too early.
-            </p>
+            <p>{messages.app.intro}</p>
           </div>
 
           <div className="command-actions">
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={() => {
+                startTransition(() => {
+                  setSelectedWorkspaceId("");
+                });
+              }}
+            >
+              {messages.app.backToWorkspaces}
+            </button>
             <label className="field repo-picker">
-              <span>Repository</span>
+              <span>{messages.localeLabel}</span>
+              <select
+                value={locale}
+                onChange={(event) =>
+                  setLocale(resolveLocale(event.target.value, locale))
+                }
+              >
+                {SUPPORTED_LOCALES.map((entry) => (
+                  <option key={entry} value={entry}>
+                    {messages.localeNames[entry]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field repo-picker">
+              <span>{messages.app.repositoryScope}</span>
               <select
                 value={selectedRepositoryId}
                 onChange={(event) => {
@@ -471,12 +682,18 @@ export function App() {
                 });
               }}
             >
-              Refresh graph
+              {messages.app.refreshGraph}
             </button>
             <div className="status-note">
-              <span>Last index</span>
+              <span>{messages.app.workspaceLabel}</span>
               <strong>
-                {formatTimestamp(status?.lastIndexRun?.completedAt)}
+                {selectedWorkspace?.label ?? messages.common.loading}
+              </strong>
+            </div>
+            <div className="status-note">
+              <span>{messages.app.lastIndexLabel}</span>
+              <strong>
+                {formatTimestamp(locale, status?.lastIndexRun?.completedAt)}
               </strong>
             </div>
           </div>
@@ -489,50 +706,71 @@ export function App() {
         <section className="workspace-grid">
           <aside className="panel rail-panel">
             <div className="panel-heading">
-              <span className="panel-kicker">Workspace status</span>
-              <h2>Graph state</h2>
+              <span className="panel-kicker">
+                {messages.app.workspaceStatusKicker}
+              </span>
+              <h2>{messages.app.graphStateTitle}</h2>
             </div>
 
             <dl className="metric-grid">
               <Metric
-                label="Packages"
+                label={messages.app.packagesLabel}
                 value={status?.counts.packageCount ?? 0}
               />
-              <Metric label="Files" value={status?.counts.fileCount ?? 0} />
-              <Metric label="Symbols" value={status?.counts.symbolCount ?? 0} />
-              <Metric label="Routes" value={status?.counts.routeCount ?? 0} />
               <Metric
-                label="Query edges"
+                label={messages.app.filesLabel}
+                value={status?.counts.fileCount ?? 0}
+              />
+              <Metric
+                label={messages.app.symbolsLabel}
+                value={status?.counts.symbolCount ?? 0}
+              />
+              <Metric
+                label={messages.app.routesLabel}
+                value={status?.counts.routeCount ?? 0}
+              />
+              <Metric
+                label={messages.app.queryEdgesLabel}
                 value={status?.counts.queryEdgeCount ?? 0}
               />
             </dl>
 
             <div className="meta-block">
-              <span>Repository</span>
-              <strong>{selectedRepository?.label ?? "Đang tải..."}</strong>
+              <span>{messages.app.repositoryLabel}</span>
+              <strong>
+                {selectedRepository?.label ?? messages.common.loading}
+              </strong>
             </div>
             <div className="meta-block">
-              <span>Repository root</span>
-              <strong>{selectedRepository?.rootPath ?? "Đang tải..."}</strong>
+              <span>{messages.app.repositoryRootLabel}</span>
+              <strong>
+                {selectedRepository?.rootPath ?? messages.common.loading}
+              </strong>
             </div>
             <div className="meta-block">
-              <span>Workspace root</span>
-              <strong>{status?.workspaceRoot ?? "Đang tải..."}</strong>
+              <span>{messages.app.workspaceRootLabel}</span>
+              <strong>
+                {status?.workspaceRoot ?? messages.common.loading}
+              </strong>
             </div>
             <div className="meta-block">
-              <span>DB path</span>
-              <strong>{status?.dbPath ?? "Đang tải..."}</strong>
+              <span>{messages.app.dbPathLabel}</span>
+              <strong>{status?.dbPath ?? messages.common.loading}</strong>
             </div>
             <div className="meta-block">
-              <span>Mode</span>
-              <strong>{status?.lastIndexRun?.mode ?? "chưa có"}</strong>
+              <span>{messages.app.modeLabel}</span>
+              <strong>
+                {status?.lastIndexRun?.mode ?? messages.common.noneYet}
+              </strong>
             </div>
 
             <div className="panel-divider" />
 
             <div className="panel-heading compact">
-              <span className="panel-kicker">Workspace scope</span>
-              <h2>Triage lens</h2>
+              <span className="panel-kicker">
+                {messages.app.workspaceScopeKicker}
+              </span>
+              <h2>{messages.app.triageLensTitle}</h2>
             </div>
 
             <div className="scope-toggle">
@@ -556,17 +794,19 @@ export function App() {
             <div className="panel-divider" />
 
             <div className="panel-heading compact">
-              <span className="panel-kicker">Packages</span>
-              <h2>Route filter</h2>
+              <span className="panel-kicker">
+                {messages.app.packagesKicker}
+              </span>
+              <h2>{messages.app.routeFilterTitle}</h2>
             </div>
 
             <label className="field">
-              <span>Filter by package</span>
+              <span>{messages.app.filterByPackageLabel}</span>
               <select
                 value={selectedPackageId}
                 onChange={(event) => setSelectedPackageId(event.target.value)}
               >
-                <option value="">All visible packages</option>
+                <option value="">{messages.app.allVisiblePackages}</option>
                 {packageEntries.map((entry) => (
                   <option key={entry.id} value={entry.id}>
                     {entry.label}
@@ -593,13 +833,13 @@ export function App() {
                     }
                   >
                     <span className="list-chip">
-                      {formatScopeLabel(entry.scope)}
+                      {formatScopeLabel(locale, entry.scope)}
                     </span>
                     <span className="list-title">{entry.label}</span>
                     <span className="list-meta">{entry.secondaryLabel}</span>
                     {entry.disambiguation ? (
                       <span className="list-subtle">
-                        Duplicate label, path used to disambiguate.
+                        {messages.app.duplicateLabelHint}
                       </span>
                     ) : null}
                   </button>
@@ -611,21 +851,20 @@ export function App() {
           <section className="workspace-main">
             <article className="panel graph-panel">
               <div className="panel-heading">
-                <span className="panel-kicker">Architecture graph</span>
-                <h2>Bounded relationship view</h2>
-                <p>
-                  Graph view chỉ hiển thị neighborhood quanh selection hiện tại
-                  để tránh noise trên self-host repo.
-                </p>
+                <span className="panel-kicker">
+                  {messages.app.architectureGraphKicker}
+                </span>
+                <h2>{messages.app.boundedRelationshipTitle}</h2>
+                <p>{messages.app.architectureGraphDescription}</p>
               </div>
 
               <div className="graph-toolbar">
                 {(
                   [
-                    ["flow", "Flow"],
-                    ["depends", "Dependencies"],
-                    ["impacts", "Impact"],
-                    ["contains", "Contains"],
+                    ["flow", messages.app.graphEdgeFlow],
+                    ["depends", messages.app.graphEdgeDepends],
+                    ["impacts", messages.app.graphEdgeImpacts],
+                    ["contains", messages.app.graphEdgeContains],
                   ] as const
                 ).map(([key, label]) => (
                   <button
@@ -649,6 +888,7 @@ export function App() {
               </div>
 
               <GraphWorkspace
+                locale={locale}
                 graph={architectureGraph}
                 nodes={positionedGraphNodes}
                 onSelectNode={(node) =>
@@ -672,17 +912,16 @@ export function App() {
 
             <article className="panel">
               <div className="panel-heading">
-                <span className="panel-kicker">Search results</span>
-                <h2>Symbol and file workbench</h2>
-                <p>
-                  Tập trung vào repo chính trước, rồi mở rộng sang fixtures khi
-                  cần đối chiếu.
-                </p>
+                <span className="panel-kicker">
+                  {messages.app.searchResultsKicker}
+                </span>
+                <h2>{messages.app.workbenchTitle}</h2>
+                <p>{messages.app.workbenchDescription}</p>
               </div>
 
               <div className="control-row">
                 <label className="field grow">
-                  <span>Query</span>
+                  <span>{messages.app.queryLabel}</span>
                   <input
                     value={searchText}
                     onChange={(event) => setSearchText(event.target.value)}
@@ -690,7 +929,7 @@ export function App() {
                   />
                 </label>
                 <label className="field">
-                  <span>Kind</span>
+                  <span>{messages.app.kindLabel}</span>
                   <select
                     value={searchKind}
                     onChange={(event) => setSearchKind(event.target.value)}
@@ -705,7 +944,9 @@ export function App() {
 
               <section className="search-guidance">
                 <div className="search-guidance-card">
-                  <span className="panel-kicker">Guided triage</span>
+                  <span className="panel-kicker">
+                    {messages.app.guidedTriageKicker}
+                  </span>
                   <h3>{searchWorkbench.emptyStateTitle}</h3>
                   <p>{searchWorkbench.emptyStateBody}</p>
                 </div>
@@ -729,7 +970,8 @@ export function App() {
                       }}
                     >
                       <span className="list-chip">{pick.kind}</span>
-                      <span className="list-title">{pick.query}</span>
+                      <span className="list-title">{pick.label}</span>
+                      <span className="list-meta">{pick.query}</span>
                       <span className="list-subtle">{pick.reason}</span>
                     </button>
                   ))}
@@ -746,8 +988,11 @@ export function App() {
                 {visibleSearchResults.length === 0 ? (
                   <li className="empty-state">
                     {searchText.trim()
-                      ? `Chưa thấy ${searchKind} nào khớp với "${searchText}" trong scope hiện tại. Thử một quick pick phía trên hoặc đổi kind search.`
-                      : "Chọn một quick pick phía trên hoặc gõ query để xem symbol, route, file, hoặc package match theo scope hiện tại."}
+                      ? messages.app.noSearchMatches({
+                          searchKind,
+                          searchText,
+                        })
+                      : messages.app.idleSearchPrompt}
                   </li>
                 ) : (
                   visibleSearchResults.map((item) => {
@@ -789,18 +1034,17 @@ export function App() {
 
             <article className="panel">
               <div className="panel-heading">
-                <span className="panel-kicker">Route explorer</span>
-                <h2>HTTP surface</h2>
-                <p>
-                  Route list được lọc theo scope và package thực tế, không còn
-                  phụ thuộc vào package label mơ hồ.
-                </p>
+                <span className="panel-kicker">
+                  {messages.app.routeExplorerKicker}
+                </span>
+                <h2>{messages.app.httpSurfaceTitle}</h2>
+                <p>{messages.app.routeExplorerDescription}</p>
               </div>
 
               <ul className="stack-list results-list">
                 {visibleRoutes.length === 0 ? (
                   <li className="empty-state">
-                    Không có route nào trong scope hoặc package hiện tại.
+                    {messages.app.noRoutesInScope}
                   </li>
                 ) : (
                   visibleRoutes.map((route) => {
@@ -831,9 +1075,12 @@ export function App() {
                           </span>
                           <span className="route-meta-line">
                             <span>{route.framework}</span>
-                            <span>{formatConfidence(route.confidence)}</span>
                             <span>
-                              {owningPackage?.label ?? "unmapped package"}
+                              {formatConfidence(locale, route.confidence)}
+                            </span>
+                            <span>
+                              {owningPackage?.label ??
+                                messages.app.unmappedPackage}
                             </span>
                           </span>
                           <span className="list-meta">{route.filePath}</span>
@@ -848,18 +1095,16 @@ export function App() {
 
           <aside className="panel inspector-panel">
             <div className="panel-heading">
-              <span className="panel-kicker">Detail pane</span>
-              <h2>Inspector</h2>
-              <p>
-                Chọn route, file, dependency, impact item, hoặc query hint để
-                tiếp tục drill-down.
-              </p>
+              <span className="panel-kicker">
+                {messages.app.detailPaneKicker}
+              </span>
+              <h2>{messages.app.inspectorTitle}</h2>
+              <p>{messages.app.inspectorDescription}</p>
             </div>
 
             {inspector.type === "idle" ? (
               <div className="empty-state inspector-empty">
-                Chọn một route hoặc search result để xem flow, dependencies,
-                impact, và quick actions.
+                {messages.app.inspectorEmpty}
               </div>
             ) : (
               <>
@@ -884,13 +1129,14 @@ export function App() {
                         if (selectedPath) {
                           void copyToClipboard(
                             selectedPath,
-                            "Đã copy file path.",
+                            messages.app.copiedPath,
                             setActionFeedback,
+                            locale,
                           );
                         }
                       }}
                     >
-                      Copy path
+                      {messages.common.copyPath}
                     </button>
                     <button
                       className="ghost-button"
@@ -900,13 +1146,14 @@ export function App() {
                         if (selectedCommand) {
                           void copyToClipboard(
                             selectedCommand,
-                            "Đã copy GraphTrace command.",
+                            messages.app.copiedCommand,
                             setActionFeedback,
+                            locale,
                           );
                         }
                       }}
                     >
-                      Copy command
+                      {messages.common.copyCommand}
                     </button>
                     <button
                       className="ghost-button"
@@ -926,7 +1173,7 @@ export function App() {
                         );
                       }}
                     >
-                      Re-run search
+                      {messages.app.rerunSearch}
                     </button>
                     {selectedFileHref ? (
                       <a
@@ -935,7 +1182,7 @@ export function App() {
                         target="_blank"
                         rel="noreferrer"
                       >
-                        Open file
+                        {messages.common.openFile}
                       </a>
                     ) : null}
                   </div>
@@ -947,7 +1194,7 @@ export function App() {
 
                 {detailLoading ? (
                   <div className="empty-state inspector-empty">
-                    Đang tải inspector data...
+                    {messages.app.inspectorLoading}
                   </div>
                 ) : null}
                 {detailError ? (
@@ -957,8 +1204,9 @@ export function App() {
                 {inspector.type === "route" ? (
                   <>
                     <InspectorSection
-                      title="Route flow"
-                      subtitle="Click vào từng file, package, hoặc query hint để tiếp tục trace."
+                      locale={locale}
+                      title={messages.app.routeFlowTitle}
+                      subtitle={messages.app.routeFlowSubtitle}
                       items={visibleRouteFlow}
                       workspaceRoot={status?.workspaceRoot}
                       onSelectItem={(item) =>
@@ -975,8 +1223,9 @@ export function App() {
                       onFeedback={setActionFeedback}
                     />
                     <InspectorSection
-                      title="Related packages"
-                      subtitle="Packages liên quan trực tiếp tới các file trong route flow."
+                      locale={locale}
+                      title={messages.app.relatedPackagesTitle}
+                      subtitle={messages.app.relatedPackagesSubtitle}
                       items={relatedPackageItems}
                       workspaceRoot={status?.workspaceRoot}
                       onSelectItem={(item) =>
@@ -993,8 +1242,9 @@ export function App() {
                       onFeedback={setActionFeedback}
                     />
                     <InspectorSection
-                      title="Query hints"
-                      subtitle="Những query heuristics GraphTrace tìm thấy dọc route flow."
+                      locale={locale}
+                      title={messages.app.queryHintsTitle}
+                      subtitle={messages.app.queryHintsSubtitle}
                       items={routeInsights.queryHints}
                       workspaceRoot={status?.workspaceRoot}
                       onSelectItem={(item) =>
@@ -1014,8 +1264,9 @@ export function App() {
                 ) : (
                   <>
                     <InspectorSection
-                      title="Dependencies"
-                      subtitle="Inbound và outbound trong bán kính 2 bước."
+                      locale={locale}
+                      title={messages.app.dependenciesTitle}
+                      subtitle={messages.app.dependenciesSubtitle}
                       items={visibleDependencyItems}
                       workspaceRoot={status?.workspaceRoot}
                       onSelectItem={(item) =>
@@ -1032,8 +1283,9 @@ export function App() {
                       onFeedback={setActionFeedback}
                     />
                     <InspectorSection
-                      title="Impact"
-                      subtitle="Những file và route dễ bị ảnh hưởng nếu chỉnh file này."
+                      locale={locale}
+                      title={messages.app.impactTitle}
+                      subtitle={messages.app.impactSubtitle}
                       items={visibleImpactItems}
                       workspaceRoot={status?.workspaceRoot}
                       onSelectItem={(item) =>
@@ -1070,6 +1322,7 @@ function Metric(props: { label: string; value: number }) {
 }
 
 function InspectorSection(props: {
+  locale: Locale;
   title: string;
   subtitle: string;
   items: GraphItem[];
@@ -1077,6 +1330,8 @@ function InspectorSection(props: {
   onSelectItem: (item: GraphItem) => void;
   onFeedback: (message: string) => void;
 }) {
+  const messages = getMessages(props.locale);
+
   return (
     <section className="inspector-section">
       <div className="inspector-section-heading">
@@ -1086,9 +1341,7 @@ function InspectorSection(props: {
 
       <ul className="stack-list inspector-list">
         {props.items.length === 0 ? (
-          <li className="empty-state">
-            Không có item nào trong vùng trace này.
-          </li>
+          <li className="empty-state">{messages.app.noItemsInTrace}</li>
         ) : (
           props.items.map((item) => {
             const itemCommand = buildGraphTraceCommand(item);
@@ -1109,7 +1362,7 @@ function InspectorSection(props: {
                   <span className="list-meta">
                     {item.path ?? item.id}
                     {typeof item.confidence === "number"
-                      ? ` · ${formatConfidence(item.confidence)}`
+                      ? ` · ${formatConfidence(props.locale, item.confidence)}`
                       : ""}
                   </span>
                 </button>
@@ -1123,13 +1376,14 @@ function InspectorSection(props: {
                       if (item.path) {
                         void copyToClipboard(
                           item.path,
-                          "Đã copy file path.",
+                          messages.app.copiedPath,
                           props.onFeedback,
+                          props.locale,
                         );
                       }
                     }}
                   >
-                    Copy path
+                    {messages.common.copyPath}
                   </button>
                   <button
                     className="mini-action"
@@ -1137,12 +1391,13 @@ function InspectorSection(props: {
                     onClick={() => {
                       void copyToClipboard(
                         itemCommand,
-                        "Đã copy GraphTrace command.",
+                        messages.app.copiedCommand,
                         props.onFeedback,
+                        props.locale,
                       );
                     }}
                   >
-                    Copy command
+                    {messages.common.copyCommand}
                   </button>
                   {itemFileHref ? (
                     <a
@@ -1151,7 +1406,7 @@ function InspectorSection(props: {
                       target="_blank"
                       rel="noreferrer"
                     >
-                      Open file
+                      {messages.common.openFile}
                     </a>
                   ) : null}
                 </div>
@@ -1242,12 +1497,13 @@ async function copyToClipboard(
   value: string,
   message: string,
   setFeedback: (message: string) => void,
+  locale: Locale = DEFAULT_LOCALE,
 ) {
   try {
     await navigator.clipboard.writeText(value);
     setFeedback(message);
   } catch {
-    setFeedback("Clipboard API không khả dụng trong browser này.");
+    setFeedback(getMessages(locale).app.clipboardUnavailable);
   }
 }
 
@@ -1284,47 +1540,31 @@ function getSearchSeed(item: Pick<GraphItem, "kind" | "label" | "path">) {
 }
 
 function readRepositoryFromLocation() {
-  if (typeof window === "undefined") {
-    return ".";
-  }
+  return readRouteStateFromLocation().repositoryId;
+}
 
-  return new URL(window.location.href).searchParams.get("repository") ?? ".";
+function readWorkspaceFromLocation() {
+  return readRouteStateFromLocation().workspaceId;
 }
 
 function readScopeFromLocation(): ScopeMode {
-  if (typeof window === "undefined") {
-    return "primary";
-  }
-
-  const scope = new URL(window.location.href).searchParams.get("scope");
-  return scope === "all" || scope === "tests" ? scope : "primary";
+  return readRouteStateFromLocation().scopeMode;
 }
 
 function readPackageFromLocation() {
-  if (typeof window === "undefined") {
-    return "";
-  }
-
-  return new URL(window.location.href).searchParams.get("package") ?? "";
+  return readRouteStateFromLocation().selectedPackageId;
 }
 
 function readSearchTextFromLocation() {
-  if (typeof window === "undefined") {
-    return "";
-  }
-
-  return new URL(window.location.href).searchParams.get("q") ?? "";
+  return readRouteStateFromLocation().searchText;
 }
 
 function readSearchKindFromLocation() {
-  if (typeof window === "undefined") {
-    return "symbol";
-  }
+  return readRouteStateFromLocation().searchKind;
+}
 
-  const kind = new URL(window.location.href).searchParams.get("kind");
-  return kind === "route" || kind === "file" || kind === "package"
-    ? kind
-    : "symbol";
+function readLocaleFromLocation(): Locale {
+  return readRouteStateFromLocation().locale;
 }
 
 function buildRepositoryQuery(repositoryId: string, hasExistingQuery = false) {
@@ -1340,72 +1580,97 @@ function buildRefreshQuery(refreshNonce: number, hasExistingQuery = false) {
 }
 
 function syncUiStateToLocation(state: {
+  locale: Locale;
+  workspaceId: string;
   repositoryId: string;
   scopeMode: ScopeMode;
   selectedPackageId: string;
   searchKind: string;
   searchText: string;
 }) {
-  if (typeof window === "undefined" || !state.repositoryId) {
+  if (typeof window === "undefined") {
     return;
   }
 
-  const url = new URL(window.location.href);
-  url.searchParams.set("repository", state.repositoryId);
-  url.searchParams.set("scope", state.scopeMode);
-
-  if (state.selectedPackageId) {
-    url.searchParams.set("package", state.selectedPackageId);
-  } else {
-    url.searchParams.delete("package");
-  }
-
-  if (state.searchText.trim()) {
-    url.searchParams.set("q", state.searchText);
-    url.searchParams.set("kind", state.searchKind);
-  } else {
-    url.searchParams.delete("q");
-    url.searchParams.delete("kind");
-  }
-
-  window.history.replaceState({}, "", url);
+  window.history.replaceState({}, "", buildRouteHref(state));
 }
 
-async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(
-      `Request failed: ${response.status} ${response.statusText}`,
-    );
+function readRouteStateFromLocation() {
+  if (typeof window === "undefined") {
+    return {
+      locale: DEFAULT_LOCALE,
+      workspaceId: "",
+      repositoryId: ".",
+      scopeMode: "primary" as const,
+      selectedPackageId: "",
+      searchText: "",
+      searchKind: "symbol",
+    };
   }
-  return (await response.json()) as T;
+
+  const storedLocale = resolveLocale(
+    window.localStorage.getItem(LOCALE_STORAGE_KEY),
+    DEFAULT_LOCALE,
+  );
+
+  return parseRouteState(window.location.href, storedLocale);
 }
 
-function formatTimestamp(value?: string | null) {
+function formatTimestamp(locale: Locale, value?: string | null) {
   if (!value) {
-    return "chưa có";
+    return getMessages(locale).common.noneYet;
   }
 
-  return new Date(value).toLocaleString();
+  return formatLocaleDateTime(locale, value);
 }
 
-function formatConfidence(value?: number) {
+function formatConfidence(locale: Locale, value?: number) {
   if (typeof value !== "number") {
     return "n/a";
   }
 
-  return `${Math.round(value * 100)}% confidence`;
+  return getMessages(locale).app.confidence({
+    value: Math.round(value * 100),
+  });
 }
 
-function formatScopeLabel(scope: PackageListEntry["scope"]) {
+function formatScopeLabel(locale: Locale, scope: PackageListEntry["scope"]) {
+  const messages = getMessages(locale);
+
   switch (scope) {
     case "primary":
-      return "repo";
+      return messages.common.repoScopeLabel;
     case "test":
-      return "test";
+      return messages.common.testScopeLabel;
     case "fixture":
-      return "fixture";
+      return messages.common.fixtureScopeLabel;
   }
+}
+
+function buildScopeOptions(locale: Locale): Array<{
+  id: ScopeMode;
+  label: string;
+  description: string;
+}> {
+  const messages = getMessages(locale);
+
+  return [
+    {
+      id: "primary",
+      label: messages.scope.primary.label,
+      description: messages.scope.primary.description,
+    },
+    {
+      id: "all",
+      label: messages.scope.all.label,
+      description: messages.scope.all.description,
+    },
+    {
+      id: "tests",
+      label: messages.scope.tests.label,
+      description: messages.scope.tests.description,
+    },
+  ];
 }
 
 function joinPath(root: string, path: string) {

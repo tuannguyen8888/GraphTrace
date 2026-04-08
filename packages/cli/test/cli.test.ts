@@ -673,4 +673,176 @@ describe("cli", () => {
       true,
     );
   });
+
+  test("workspace commands add, list, reindex, and remove managed workspaces", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "graphtrace-daemon-home-"));
+    const added = await runCli(
+      [
+        "workspace",
+        "add",
+        fixtureRoot,
+        "--label",
+        "fixture",
+        "--json",
+        "--home",
+        homeDir,
+      ],
+      {
+        cwd: process.cwd(),
+      },
+    );
+
+    const addedPayload = JSON.parse(added.stdout) as {
+      id: string;
+      label: string;
+      dbPath: string;
+    };
+    const listed = await runCli(
+      ["workspace", "list", "--json", "--home", homeDir],
+      {
+        cwd: process.cwd(),
+      },
+    );
+    const listedPayload = JSON.parse(listed.stdout) as {
+      items: Array<{
+        id: string;
+        label: string;
+        dbPath: string;
+      }>;
+    };
+    const reindexed = await runCli(
+      ["workspace", "reindex", addedPayload.id, "--json", "--home", homeDir],
+      {
+        cwd: process.cwd(),
+      },
+    );
+    const reindexedPayload = JSON.parse(reindexed.stdout) as {
+      summary: {
+        routeCount: number;
+      };
+    };
+    const removed = await runCli(
+      ["workspace", "remove", addedPayload.id, "--home", homeDir],
+      {
+        cwd: process.cwd(),
+      },
+    );
+    const listedAfterRemoval = await runCli(
+      ["workspace", "list", "--json", "--home", homeDir],
+      {
+        cwd: process.cwd(),
+      },
+    );
+
+    expect(added.exitCode).toBe(0);
+    expect(addedPayload.label).toBe("fixture");
+    expect(addedPayload.dbPath).toContain(join(".graphtrace", "workspaces"));
+    expect(listed.exitCode).toBe(0);
+    expect(listedPayload.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: addedPayload.id,
+          label: "fixture",
+        }),
+      ]),
+    );
+    expect(reindexed.exitCode).toBe(0);
+    expect(reindexedPayload.summary.routeCount).toBeGreaterThan(0);
+    expect(removed.exitCode).toBe(0);
+    expect(JSON.parse(listedAfterRemoval.stdout).items).toEqual([]);
+  });
+
+  test("concurrent workspace add commands do not hit SQLITE_BUSY", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "graphtrace-daemon-home-"));
+    const fixtureA = join(
+      process.cwd(),
+      "fixtures",
+      "express-prisma-workspace",
+    );
+    const fixtureB = join(process.cwd(), "fixtures", "fastify-workspace");
+
+    const [addA, addB] = await Promise.all([
+      runCliProcess(process.cwd(), [
+        "workspace",
+        "add",
+        fixtureA,
+        "--label",
+        "fixture-a",
+        "--home",
+        homeDir,
+      ]),
+      runCliProcess(process.cwd(), [
+        "workspace",
+        "add",
+        fixtureB,
+        "--label",
+        "fixture-b",
+        "--home",
+        homeDir,
+      ]),
+    ]);
+
+    const listed = await runCli(
+      ["workspace", "list", "--json", "--home", homeDir],
+      {
+        cwd: process.cwd(),
+      },
+    );
+    const listedPayload = JSON.parse(listed.stdout) as {
+      items: Array<{ label: string }>;
+    };
+
+    expect(addA.code).toBe(0);
+    expect(addB.code).toBe(0);
+    expect(addA.stderr).not.toContain("database is locked");
+    expect(addB.stderr).not.toContain("database is locked");
+    expect(listedPayload.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: "fixture-a" }),
+        expect.objectContaining({ label: "fixture-b" }),
+      ]),
+    );
+  }, 20_000);
+
+  test("serve starts a multi-workspace daemon web server", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "graphtrace-daemon-home-"));
+    const added = await runCli(
+      [
+        "workspace",
+        "add",
+        fixtureRoot,
+        "--label",
+        "fixture",
+        "--json",
+        "--home",
+        homeDir,
+      ],
+      {
+        cwd: process.cwd(),
+      },
+    );
+    expect(added.exitCode).toBe(0);
+
+    const server = await runCli(["serve", "--port", "0", "--home", homeDir], {
+      cwd: process.cwd(),
+    });
+
+    expect(server.exitCode).toBe(0);
+    expect(server.keepAlive).toBe(true);
+    expect(server.stdout).toContain("serve:http://127.0.0.1:");
+
+    const response = await fetch(
+      `${server.stdout.replace("serve:", "")}/api/workspaces`,
+    );
+    const payload = (await response.json()) as {
+      items: Array<{ label: string }>;
+    };
+
+    expect(response.ok).toBe(true);
+    expect(payload.items).toEqual(
+      expect.arrayContaining([expect.objectContaining({ label: "fixture" })]),
+    );
+
+    await server.cleanup?.();
+  });
 });

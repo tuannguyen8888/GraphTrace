@@ -186,6 +186,7 @@ describe("server", () => {
   test("exposes repository-aware APIs for self-host workspaces", async () => {
     await ensureWorkspaceInitialized(selfHostRoot);
     await indexWorkspace({ workspaceRoot: selfHostRoot, full: true });
+    const nextFixtureRepositoryId = "fixtures/next-api-workspace/apps/web";
 
     const app = createGraphTraceApp({
       workspaceRoot: selfHostRoot,
@@ -202,11 +203,11 @@ describe("server", () => {
       });
       const fixtureRoutes = await app.inject({
         method: "GET",
-        url: `/api/routes?repository=${encodeURIComponent("fixtures/next-api-workspace")}`,
+        url: `/api/routes?repository=${encodeURIComponent(nextFixtureRepositoryId)}`,
       });
       const fixtureStatus = await app.inject({
         method: "GET",
-        url: `/api/status?repository=${encodeURIComponent("fixtures/next-api-workspace")}`,
+        url: `/api/status?repository=${encodeURIComponent(nextFixtureRepositoryId)}`,
       });
 
       const repositoriesPayload = repositories.json();
@@ -221,7 +222,7 @@ describe("server", () => {
             id: ".",
           }),
           expect.objectContaining({
-            id: "fixtures/next-api-workspace",
+            id: nextFixtureRepositoryId,
           }),
         ]),
       );
@@ -236,7 +237,7 @@ describe("server", () => {
         ),
       ).toBe(true);
       expect(fixtureStatusPayload.selectedRepositoryId).toBe(
-        "fixtures/next-api-workspace",
+        nextFixtureRepositoryId,
       );
       expect(fixtureStatusPayload.counts.routeCount).toBeGreaterThan(0);
     } finally {

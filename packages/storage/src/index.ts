@@ -1020,3 +1020,6 @@ export function openGraphStore(
 ): GraphStore {
   return new GraphStore(dbPath, options);
 }
+
+export * from "./workspace-paths";
+export * from "./workspace-registry";

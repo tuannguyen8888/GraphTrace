@@ -101,12 +101,16 @@ export async function runWorkspaceIndex(options: {
   mode?: "full" | "incremental";
   changedFiles?: string[];
   removedFiles?: string[];
+  dbPath?: string;
+  persistWorkspaceArtifacts?: boolean;
 }) {
   return indexWorkspace({
     workspaceRoot: options.workspaceRoot,
     full: options.mode === "full",
     changedFiles: options.changedFiles,
     removedFiles: options.removedFiles,
+    dbPath: options.dbPath,
+    persistWorkspaceArtifacts: options.persistWorkspaceArtifacts,
   });
 }
 
@@ -115,6 +119,13 @@ export function withWorkspaceQueryEngine<T>(
   action: (engine: ReturnType<typeof createQueryEngine>, dbPath: string) => T,
 ): T {
   const dbPath = join(workspaceRoot, GRAPHTRACE_DB_PATH);
+  return withWorkspaceQueryEngineForDbPath(dbPath, action);
+}
+
+export function withWorkspaceQueryEngineForDbPath<T>(
+  dbPath: string,
+  action: (engine: ReturnType<typeof createQueryEngine>, dbPath: string) => T,
+): T {
   const store = openGraphStore(dbPath, {
     readOnly: true,
     timeout: 2_000,

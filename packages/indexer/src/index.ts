@@ -6,11 +6,14 @@ import fg from "fast-glob";
 import ts from "typescript";
 
 import {
+  defaultGraphTraceConfig,
   ensureWorkspaceInitialized,
   loadGraphTraceConfig,
 } from "@graphtrace/config";
 import {
   type DiscoveredUnit,
+  GRAPHTRACE_DB_PATH,
+  type GraphTraceConfig,
   type IndexWorkspaceOptions,
   type IndexWorkspaceResult,
   type PluginProvenance,
@@ -26,9 +29,17 @@ export { inspectWorkspace } from "./workspace";
 export async function indexWorkspace(
   options: IndexWorkspaceOptions,
 ): Promise<IndexWorkspaceResult> {
-  const initialized = await ensureWorkspaceInitialized(options.workspaceRoot);
-  const config = await loadGraphTraceConfig(options.workspaceRoot);
-  const store = openGraphStore(initialized.dbPath);
+  const persistWorkspaceArtifacts =
+    options.persistWorkspaceArtifacts ?? !options.dbPath;
+  const config = await resolveWorkspaceConfig(
+    options.workspaceRoot,
+    persistWorkspaceArtifacts,
+    options.configOverrides,
+  );
+  const dbPath =
+    options.dbPath ?? join(options.workspaceRoot, GRAPHTRACE_DB_PATH);
+
+  const store = openGraphStore(dbPath);
   const inspection = await inspectWorkspace(options.workspaceRoot, config);
 
   if (options.full !== false) {
@@ -162,13 +173,69 @@ export async function indexWorkspace(
   store.close();
 
   return {
-    dbPath: initialized.dbPath,
+    dbPath,
     summary,
     units: inspection.units,
     explain: {
       units: inspection.units,
     },
   };
+}
+
+async function resolveWorkspaceConfig(
+  workspaceRoot: string,
+  persistWorkspaceArtifacts: boolean,
+  overrides: Partial<GraphTraceConfig> | undefined,
+): Promise<GraphTraceConfig> {
+  if (persistWorkspaceArtifacts) {
+    await ensureWorkspaceInitialized(workspaceRoot, overrides ?? {});
+  }
+
+  let baseConfig = defaultGraphTraceConfig;
+
+  try {
+    baseConfig = await loadGraphTraceConfig(workspaceRoot);
+  } catch (error) {
+    if (!isMissingFileError(error)) {
+      throw error;
+    }
+  }
+
+  return mergeGraphTraceConfig(baseConfig, overrides);
+}
+
+function mergeGraphTraceConfig(
+  baseConfig: GraphTraceConfig,
+  overrides: Partial<GraphTraceConfig> | undefined,
+): GraphTraceConfig {
+  return {
+    ...baseConfig,
+    ...overrides,
+    detection: {
+      ...baseConfig.detection,
+      ...overrides?.detection,
+    },
+    plugins: {
+      ...baseConfig.plugins,
+      ...overrides?.plugins,
+    },
+    search: {
+      ...baseConfig.search,
+      ...overrides?.search,
+    },
+    web: {
+      ...baseConfig.web,
+      ...overrides?.web,
+    },
+  };
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    (error as NodeJS.ErrnoException).code === "ENOENT"
+  );
 }
 
 function findOwningPackage(
