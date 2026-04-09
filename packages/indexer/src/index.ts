@@ -23,6 +23,7 @@ import {
 } from "@graphtrace/shared";
 import { openGraphStore } from "@graphtrace/storage";
 import { extractSymbols } from "./extract-symbols";
+import { extractReferences } from "./extract-references";
 import { buildInlineRouteHandlerId } from "./symbol-graph-types";
 import { type WorkspacePackageInfo, inspectWorkspace } from "./workspace";
 
@@ -81,6 +82,22 @@ export async function indexWorkspace(
     staleFiles.add(toPosixPath(removedFile));
   }
 
+  const program = ts.createProgram({
+    rootNames: normalizedFilePaths.map((filePath) =>
+      join(options.workspaceRoot, filePath),
+    ),
+    options: {
+      allowJs: true,
+      checkJs: false,
+      jsx: ts.JsxEmit.Preserve,
+      module: ts.ModuleKind.NodeNext,
+      moduleResolution: ts.ModuleResolutionKind.NodeNext,
+      skipLibCheck: true,
+      target: ts.ScriptTarget.Latest,
+    },
+  });
+  const checker = program.getTypeChecker();
+
   for (const staleFile of staleFiles) {
     store.deleteFileArtifacts(staleFile);
   }
@@ -104,12 +121,14 @@ export async function indexWorkspace(
       hash,
     });
 
-    const sourceFile = ts.createSourceFile(
-      absolutePath,
-      sourceText,
-      ts.ScriptTarget.Latest,
-      true,
-    );
+    const sourceFile =
+      program.getSourceFile(absolutePath) ??
+      ts.createSourceFile(
+        absolutePath,
+        sourceText,
+        ts.ScriptTarget.Latest,
+        true,
+      );
     const localImports = extractImports(
       sourceFile,
       options.workspaceRoot,
@@ -167,6 +186,15 @@ export async function indexWorkspace(
       matchedPluginIds,
     )) {
       store.insertEdge(query);
+    }
+
+    for (const edge of extractReferences({
+      workspaceRoot: options.workspaceRoot,
+      sourceFile,
+      filePath,
+      checker,
+    })) {
+      store.upsertSymbolEdge(edge);
     }
   }
 
