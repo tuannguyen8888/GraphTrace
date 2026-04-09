@@ -309,4 +309,80 @@ describe("storage", () => {
       store.close();
     }
   });
+
+  test("symbol neighbor graphs include direct call and reference edge types", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "graphtrace-storage-"));
+    const store = openGraphStore(
+      join(workspaceRoot, ".graphtrace", "index.db"),
+    );
+
+    try {
+      store.upsertSymbol({
+        id: "symbol:source",
+        name: "source",
+        displayName: "source",
+        kind: "function",
+        language: "typescript",
+        fileId: "file:source.ts",
+        filePath: "source.ts",
+        exported: true,
+      });
+      store.upsertSymbol({
+        id: "symbol:target",
+        name: "target",
+        displayName: "target",
+        kind: "function",
+        language: "typescript",
+        fileId: "file:target.ts",
+        filePath: "target.ts",
+        exported: true,
+      });
+
+      store.upsertSymbolEdge({
+        id: "edge:calls:source->target",
+        type: "calls",
+        sourceId: "symbol:source",
+        sourceKind: "symbol",
+        targetId: "symbol:target",
+        targetKind: "symbol",
+        confidence: 1,
+        confidenceLabel: "proven",
+        provenance: {
+          kind: "direct-call",
+          source: "typescript-checker",
+          evidence: ["source.ts:4:2"],
+        },
+      });
+      store.upsertSymbolEdge({
+        id: "edge:references:source->target",
+        type: "references",
+        sourceId: "symbol:source",
+        sourceKind: "symbol",
+        targetId: "symbol:target",
+        targetKind: "symbol",
+        confidence: 1,
+        confidenceLabel: "proven",
+        provenance: {
+          kind: "identifier-reference",
+          source: "typescript-checker",
+          evidence: ["source.ts:5:2"],
+        },
+      });
+
+      expect(store.symbolNeighbors("symbol:source")).toMatchObject({
+        edges: expect.arrayContaining([
+          expect.objectContaining({
+            type: "calls",
+            targetId: "symbol:target",
+          }),
+          expect.objectContaining({
+            type: "references",
+            targetId: "symbol:target",
+          }),
+        ]),
+      });
+    } finally {
+      store.close();
+    }
+  });
 });

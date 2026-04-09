@@ -222,4 +222,42 @@ describe("indexWorkspace", () => {
       store.close();
     }
   });
+
+  test("stores direct call and reference edges between symbols", async () => {
+    await ensureWorkspaceInitialized(symbolGraphFixtureRoot);
+
+    await indexWorkspace({
+      workspaceRoot: symbolGraphFixtureRoot,
+      full: true,
+    });
+
+    const store = openGraphStore(
+      join(symbolGraphFixtureRoot, ".graphtrace", "index.db"),
+    );
+
+    try {
+      expect(
+        store.symbolNeighbors(
+          "symbol:apps/api/src/routes/users.ts#router.post.reports",
+        ),
+      ).toMatchObject({
+        edges: expect.arrayContaining([
+          expect.objectContaining({
+            type: "calls",
+            sourceId: "symbol:apps/api/src/routes/users.ts#router.post.reports",
+            targetId: "symbol:apps/api/src/services/user-service.ts#createReporter",
+            confidenceLabel: "proven",
+          }),
+          expect.objectContaining({
+            type: "references",
+            sourceId: "symbol:apps/api/src/routes/users.ts#router.post.reports",
+            targetId: "symbol:apps/api/src/services/user-service.ts#metrics.trackRoute",
+            confidenceLabel: "proven",
+          }),
+        ]),
+      });
+    } finally {
+      store.close();
+    }
+  });
 });

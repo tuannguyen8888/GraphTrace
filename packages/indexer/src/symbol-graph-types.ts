@@ -1,4 +1,4 @@
-import type ts from "typescript";
+import ts from "typescript";
 
 import type { SourceSpan, SymbolDescriptor } from "@graphtrace/shared";
 import { toPosixPath } from "@graphtrace/shared";
@@ -41,6 +41,99 @@ export function buildInlineRouteHandlerId(
   );
 }
 
+export function symbolIdFromDeclaration(
+  declaration: ts.Declaration,
+  filePath: string,
+): string | null {
+  if (ts.isFunctionDeclaration(declaration) && declaration.name) {
+    return buildSymbolId(filePath, declaration.name.text);
+  }
+
+  if (ts.isClassDeclaration(declaration) && declaration.name) {
+    return buildSymbolId(filePath, declaration.name.text);
+  }
+
+  if (ts.isVariableDeclaration(declaration) && ts.isIdentifier(declaration.name)) {
+    if (!isTopLevelVariableDeclaration(declaration)) {
+      return null;
+    }
+    return buildSymbolId(filePath, declaration.name.text);
+  }
+
+  if (
+    ts.isMethodDeclaration(declaration) &&
+    declaration.name &&
+    ts.isIdentifier(declaration.name)
+  ) {
+    const ownerName = ownerNameForMember(declaration);
+    if (ownerName) {
+      return buildSymbolId(filePath, `${ownerName}.${declaration.name.text}`);
+    }
+  }
+
+  if (
+    ts.isPropertyAssignment(declaration) &&
+    ts.isIdentifier(declaration.name) &&
+    (ts.isArrowFunction(declaration.initializer) ||
+      ts.isFunctionExpression(declaration.initializer))
+  ) {
+    const ownerName = ownerNameForObjectLiteral(declaration.parent);
+    if (ownerName) {
+      return buildSymbolId(filePath, `${ownerName}.${declaration.name.text}`);
+    }
+  }
+
+  return null;
+}
+
+export function routeCallDetails(
+  callExpression: ts.CallExpression,
+): { receiver: string; method: string; routePath: string } | null {
+  if (
+    !ts.isPropertyAccessExpression(callExpression.expression) ||
+    !ts.isIdentifier(callExpression.expression.expression)
+  ) {
+    return null;
+  }
+
+  const method = callExpression.expression.name.text.toLowerCase();
+  const [firstArgument] = callExpression.arguments;
+  if (
+    !HTTP_ROUTE_METHODS.includes(method) ||
+    !firstArgument ||
+    !ts.isStringLiteralLike(firstArgument)
+  ) {
+    return null;
+  }
+
+  return {
+    receiver: callExpression.expression.expression.text,
+    method,
+    routePath: firstArgument.text,
+  };
+}
+
+export function inlineRouteHandlerSymbolId(
+  node: ts.ArrowFunction | ts.FunctionExpression,
+  filePath: string,
+): string | null {
+  if (!ts.isCallExpression(node.parent)) {
+    return null;
+  }
+
+  const route = routeCallDetails(node.parent);
+  if (!route) {
+    return null;
+  }
+
+  return buildInlineRouteHandlerId(
+    filePath,
+    route.receiver,
+    route.method,
+    route.routePath,
+  );
+}
+
 export function buildSourceSpan(
   sourceFile: ts.SourceFile,
   node: ts.Node,
@@ -71,4 +164,41 @@ export function sanitizeSegment(value: string): string {
     .replace(/[^A-Za-z0-9]+/g, ".")
     .replace(/^\.+|\.+$/g, "")
     .replace(/\.{2,}/g, ".");
+}
+
+function ownerNameForMember(
+  declaration: ts.MethodDeclaration,
+): string | null {
+  if (
+    ts.isClassDeclaration(declaration.parent) &&
+    declaration.parent.name?.text
+  ) {
+    return declaration.parent.name.text;
+  }
+
+  if (ts.isObjectLiteralExpression(declaration.parent)) {
+    return ownerNameForObjectLiteral(declaration.parent);
+  }
+
+  return null;
+}
+
+function ownerNameForObjectLiteral(node: ts.ObjectLiteralExpression): string | null {
+  if (
+    ts.isVariableDeclaration(node.parent) &&
+    ts.isIdentifier(node.parent.name) &&
+    isTopLevelVariableDeclaration(node.parent)
+  ) {
+    return node.parent.name.text;
+  }
+
+  return null;
+}
+
+function isTopLevelVariableDeclaration(node: ts.VariableDeclaration): boolean {
+  return (
+    ts.isVariableDeclarationList(node.parent) &&
+    ts.isVariableStatement(node.parent.parent) &&
+    ts.isSourceFile(node.parent.parent.parent)
+  );
 }
