@@ -4,11 +4,11 @@ import { fileURLToPath } from "node:url";
 
 import Fastify, { type FastifyInstance } from "fastify";
 
-import type { SymbolLocator } from "@graphtrace/shared";
 import {
   type createQueryEngine,
   withWorkspaceQueryEngine,
 } from "@graphtrace/query-engine";
+import type { SymbolLocator } from "@graphtrace/shared";
 import type { GraphTraceDaemon } from "./daemon";
 
 export interface GraphTraceServer {
@@ -553,31 +553,25 @@ function registerWorkspaceScopedRoutes(
       engine.getSymbol(symbolLocatorFromQuery(request.query)),
     );
   });
-  app.get(
-    "/api/workspaces/:workspaceId/symbols/neighbors",
-    async (request) => {
-      const { workspaceId } = request.params as { workspaceId: string };
-      return daemon.withWorkspaceQueryEngine(workspaceId, (engine) =>
-        engine.getSymbolNeighbors(symbolLocatorFromQuery(request.query)),
-      );
-    },
-  );
-  app.get(
-    "/api/workspaces/:workspaceId/symbols/execution",
-    async (request) => {
-      const { workspaceId } = request.params as { workspaceId: string };
-      const { maxNodes, maxEdges } = request.query as {
-        maxNodes?: string;
-        maxEdges?: string;
-      };
-      return daemon.withWorkspaceQueryEngine(workspaceId, (engine) =>
-        engine.executionContextFromSymbol(symbolLocatorFromQuery(request.query), {
-          maxNodes: maxNodes ? Number(maxNodes) : undefined,
-          maxEdges: maxEdges ? Number(maxEdges) : undefined,
-        }),
-      );
-    },
-  );
+  app.get("/api/workspaces/:workspaceId/symbols/neighbors", async (request) => {
+    const { workspaceId } = request.params as { workspaceId: string };
+    return daemon.withWorkspaceQueryEngine(workspaceId, (engine) =>
+      engine.getSymbolNeighbors(symbolLocatorFromQuery(request.query)),
+    );
+  });
+  app.get("/api/workspaces/:workspaceId/symbols/execution", async (request) => {
+    const { workspaceId } = request.params as { workspaceId: string };
+    const { maxNodes, maxEdges } = request.query as {
+      maxNodes?: string;
+      maxEdges?: string;
+    };
+    return daemon.withWorkspaceQueryEngine(workspaceId, (engine) =>
+      engine.executionContextFromSymbol(symbolLocatorFromQuery(request.query), {
+        maxNodes: maxNodes ? Number(maxNodes) : undefined,
+        maxEdges: maxEdges ? Number(maxEdges) : undefined,
+      }),
+    );
+  });
   app.get("/api/workspaces/:workspaceId/symbols/impact", async (request) => {
     const { workspaceId } = request.params as { workspaceId: string };
     const { maxNodes, maxEdges } = request.query as {

@@ -363,9 +363,9 @@ describe("mcp", () => {
         ]),
       );
       expect(impact.isError).not.toBe(true);
-      expect(
-        impactPayload.graph?.summary?.truncated?.nodeLimitReached,
-      ).toBe(true);
+      expect(impactPayload.graph?.summary?.truncated?.nodeLimitReached).toBe(
+        true,
+      );
       expect(edge.isError).not.toBe(true);
       expect(edgePayload).toMatchObject({
         id: "edge:routes_to:GET /users->symbol:apps/api/src/routes/users.ts#auditedListUsers",

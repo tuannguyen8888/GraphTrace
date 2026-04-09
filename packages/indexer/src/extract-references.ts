@@ -2,7 +2,10 @@ import ts from "typescript";
 
 import type { GraphEdgeDescriptor } from "@graphtrace/shared";
 import { relativePath, toPosixPath } from "@graphtrace/shared";
-import { inlineRouteHandlerSymbolId, symbolIdFromDeclaration } from "./symbol-graph-types";
+import {
+  inlineRouteHandlerSymbolId,
+  symbolIdFromDeclaration,
+} from "./symbol-graph-types";
 
 export function extractReferences(options: {
   workspaceRoot: string;
@@ -47,10 +50,7 @@ export function extractReferences(options: {
   };
 
   const visit = (node: ts.Node, currentSourceId?: string) => {
-    const nextSourceId = sourceIdForNode(
-      node,
-      filePath,
-    );
+    const nextSourceId = sourceIdForNode(node, filePath);
     const activeSourceId = nextSourceId ?? currentSourceId;
 
     if (activeSourceId) {
@@ -92,13 +92,10 @@ export function extractReferences(options: {
   return [...edges.values()];
 }
 
-function sourceIdForNode(
-  node: ts.Node,
-  filePath: string,
-): string | undefined {
+function sourceIdForNode(node: ts.Node, filePath: string): string | undefined {
   if (ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) {
     return node.name
-      ? symbolIdFromDeclaration(node, toPosixPath(filePath)) ?? undefined
+      ? (symbolIdFromDeclaration(node, toPosixPath(filePath)) ?? undefined)
       : undefined;
   }
 
@@ -111,14 +108,18 @@ function sourceIdForNode(
     ts.isVariableDeclaration(node.parent) &&
     ts.isIdentifier(node.parent.name)
   ) {
-    return symbolIdFromDeclaration(node.parent, toPosixPath(filePath)) ?? undefined;
+    return (
+      symbolIdFromDeclaration(node.parent, toPosixPath(filePath)) ?? undefined
+    );
   }
 
   if (
     (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) &&
     ts.isPropertyAssignment(node.parent)
   ) {
-    return symbolIdFromDeclaration(node.parent, toPosixPath(filePath)) ?? undefined;
+    return (
+      symbolIdFromDeclaration(node.parent, toPosixPath(filePath)) ?? undefined
+    );
   }
 
   if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {

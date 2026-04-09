@@ -127,7 +127,10 @@ export function symbolLocalNameFromDeclaration(
     return appendOwnerLocalName(declaration.name.text, declaration);
   }
 
-  if (ts.isVariableDeclaration(declaration) && ts.isIdentifier(declaration.name)) {
+  if (
+    ts.isVariableDeclaration(declaration) &&
+    ts.isIdentifier(declaration.name)
+  ) {
     if (isTopLevelVariableDeclaration(declaration)) {
       return declaration.name.text;
     }
@@ -213,9 +216,7 @@ export function sanitizeSegment(value: string): string {
     .replace(/\.{2,}/g, ".");
 }
 
-function ownerNameForMember(
-  declaration: ts.MethodDeclaration,
-): string | null {
+function ownerNameForMember(declaration: ts.MethodDeclaration): string | null {
   if (
     ts.isClassDeclaration(declaration.parent) &&
     declaration.parent.name?.text
@@ -230,7 +231,9 @@ function ownerNameForMember(
   return null;
 }
 
-function ownerNameForObjectLiteral(node: ts.ObjectLiteralExpression): string | null {
+function ownerNameForObjectLiteral(
+  node: ts.ObjectLiteralExpression,
+): string | null {
   if (
     ts.isVariableDeclaration(node.parent) &&
     ts.isIdentifier(node.parent.name)

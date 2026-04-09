@@ -3,6 +3,7 @@ import ts from "typescript";
 import type { SymbolDescriptor } from "@graphtrace/shared";
 import { toPosixPath } from "@graphtrace/shared";
 import {
+  HTTP_ROUTE_METHODS,
   buildFileId,
   buildInlineRouteHandlerId,
   buildSignatureText,
@@ -10,7 +11,6 @@ import {
   buildSymbolId,
   detectSymbolLanguage,
   findWrappedCallbackExpression,
-  HTTP_ROUTE_METHODS,
   ownerSymbolInfoForDeclaration,
   symbolLocalNameFromDeclaration,
 } from "./symbol-graph-types";
@@ -25,9 +25,15 @@ export function extractSymbols(
   const symbols = new Map<string, SymbolDescriptor>();
 
   const addSymbol = (
-    symbol: Omit<SymbolDescriptor, "displayName" | "fileId" | "filePath" | "language"> &
+    symbol: Omit<
+      SymbolDescriptor,
+      "displayName" | "fileId" | "filePath" | "language"
+    > &
       Partial<
-        Pick<SymbolDescriptor, "displayName" | "fileId" | "filePath" | "language">
+        Pick<
+          SymbolDescriptor,
+          "displayName" | "fileId" | "filePath" | "language"
+        >
       >,
   ) => {
     const next: SymbolDescriptor = {
@@ -72,7 +78,11 @@ export function extractSymbols(
       });
     }
 
-    if (ts.isMethodDeclaration(node) && node.name && ts.isIdentifier(node.name)) {
+    if (
+      ts.isMethodDeclaration(node) &&
+      node.name &&
+      ts.isIdentifier(node.name)
+    ) {
       const localName = symbolLocalNameFromDeclaration(node);
       const owner = ownerSymbolInfoForDeclaration(node, normalizedFilePath);
       if (localName && owner) {
@@ -94,7 +104,9 @@ export function extractSymbols(
       const localName = symbolLocalNameFromDeclaration(node);
       if (localName) {
         const owner = ownerSymbolInfoForDeclaration(node, normalizedFilePath);
-        const callableInitializer = extractCallableInitializer(node.initializer);
+        const callableInitializer = extractCallableInitializer(
+          node.initializer,
+        );
 
         addSymbol({
           id: buildSymbolId(normalizedFilePath, localName),
@@ -117,7 +129,11 @@ export function extractSymbols(
       const owner = ownerSymbolInfoForDeclaration(node, normalizedFilePath);
       const callableInitializer = extractCallableInitializer(node.initializer);
 
-      if (localName && owner && (callableInitializer || ts.isObjectLiteralExpression(node.initializer))) {
+      if (
+        localName &&
+        owner &&
+        (callableInitializer || ts.isObjectLiteralExpression(node.initializer))
+      ) {
         addSymbol({
           id: buildSymbolId(normalizedFilePath, localName),
           name: node.name.text,
@@ -147,10 +163,7 @@ export function extractSymbols(
       const receiver = node.expression.expression.text;
       const method = node.expression.name.text.toLowerCase();
       const [firstArgument] = node.arguments;
-      const handler =
-        node.arguments
-          .map((argument) => extractCallableInitializer(argument))
-          .findLast(Boolean) ?? null;
+      const handler = findLastCallableInitializer(node.arguments);
 
       if (
         handler &&
@@ -244,4 +257,17 @@ function classifyDeclarationKind(
   }
 
   return "variable";
+}
+
+function findLastCallableInitializer(
+  nodes: ts.NodeArray<ts.Expression>,
+): ts.ArrowFunction | ts.FunctionExpression | null {
+  for (let index = nodes.length - 1; index >= 0; index -= 1) {
+    const candidate = extractCallableInitializer(nodes[index]);
+    if (candidate) {
+      return candidate;
+    }
+  }
+
+  return null;
 }

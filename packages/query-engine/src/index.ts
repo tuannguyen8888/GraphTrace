@@ -8,7 +8,7 @@ import type {
   SymbolDescriptor,
   SymbolLocator,
 } from "@graphtrace/shared";
-import { createGraphEnvelope, GRAPHTRACE_DB_PATH } from "@graphtrace/shared";
+import { GRAPHTRACE_DB_PATH, createGraphEnvelope } from "@graphtrace/shared";
 import type { GraphStore } from "@graphtrace/storage";
 import { openGraphStore } from "@graphtrace/storage";
 
@@ -36,6 +36,8 @@ export function createQueryEngine(store: GraphStore) {
     graph: createGraphEnvelope({
       nodes: symbols.map(toSymbolGraphItem),
       summary: {
+        nodeCount: symbols.length,
+        edgeCount: 0,
         rootNodeIds: symbols.map((symbol) => symbol.id),
         confidence: {},
       },
@@ -106,8 +108,9 @@ export function createQueryEngine(store: GraphStore) {
     },
     searchSymbols(query: string) {
       return zeroHopSymbolResult(
-        store.search(query, "symbol").items
-          .map((item) => store.symbolById(item.id))
+        store
+          .search(query, "symbol")
+          .items.map((item) => store.symbolById(item.id))
           .filter((item): item is SymbolDescriptor => item !== null),
       );
     },

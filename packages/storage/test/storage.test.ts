@@ -9,10 +9,7 @@ import {
   GRAPH_EDGE_TYPES,
   GRAPH_NODE_KINDS,
 } from "@graphtrace/shared";
-import type {
-  GraphEdgeDescriptor,
-  SymbolDescriptor,
-} from "@graphtrace/shared";
+import type { GraphEdgeDescriptor, SymbolDescriptor } from "@graphtrace/shared";
 import { openGraphStore } from "../src/index";
 
 describe("storage", () => {
@@ -257,22 +254,21 @@ describe("storage", () => {
         },
       });
 
-      expect(store.symbolById("symbol:apps/api/src/routes/users.ts#listUsers"))
-        .toMatchObject({
-          ownerSymbolId: "symbol:apps/api/src/routes/users.ts#usersController",
-          ownerKind: "class",
-          signatureText: "(request, response) => Promise<void>",
-          frameworkRole: "route-handler",
-          span: {
-            startLine: 4,
-            endColumn: 4,
-          },
-        });
+      expect(
+        store.symbolById("symbol:apps/api/src/routes/users.ts#listUsers"),
+      ).toMatchObject({
+        ownerSymbolId: "symbol:apps/api/src/routes/users.ts#usersController",
+        ownerKind: "class",
+        signatureText: "(request, response) => Promise<void>",
+        frameworkRole: "route-handler",
+        span: {
+          startLine: 4,
+          endColumn: 4,
+        },
+      });
 
       expect(
-        store.symbolNeighbors(
-          "symbol:apps/api/src/routes/users.ts#listUsers",
-        ),
+        store.symbolNeighbors("symbol:apps/api/src/routes/users.ts#listUsers"),
       ).toMatchObject({
         nodes: expect.arrayContaining([
           expect.objectContaining({
