@@ -1741,16 +1741,18 @@ function runStarterAction(
   }
 
   if (action.kind === "file" && action.targetPath) {
+    const targetPath = action.targetPath;
+
     startTransition(() => {
       setSearchKind("file");
-      setSearchText(action.targetPath ?? action.query);
+      setSearchText(targetPath);
       setInspector({
         type: "search",
         item: {
-          id: `starter-file:${action.targetPath}`,
+          id: `starter-file:${targetPath}`,
           kind: "file",
-          label: action.targetPath,
-          path: action.targetPath,
+          label: targetPath,
+          path: targetPath,
         },
       });
     });

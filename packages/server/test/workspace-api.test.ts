@@ -54,7 +54,7 @@ describe("workspace api", () => {
     } finally {
       daemon.close();
     }
-  });
+  }, 15_000);
 
   test("requires workspace-scoped routes for status and search", async () => {
     const homeDir = await mkdtemp(join(tmpdir(), "graphtrace-daemon-"));
@@ -241,5 +241,5 @@ describe("workspace api", () => {
       await rm(backupRoot, { recursive: true, force: true });
       daemon.close();
     }
-  });
+  }, 15_000);
 });

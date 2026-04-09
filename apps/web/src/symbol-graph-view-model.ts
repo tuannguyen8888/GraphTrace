@@ -23,6 +23,14 @@ export function buildSymbolGraphModel(
   input: SymbolGraphData,
 ): ArchitectureGraphModel {
   const filteredGraph = filterSymbolGraph(input);
+  if (!filteredGraph) {
+    return {
+      nodes: [],
+      edges: [],
+      focusId: input.rootSymbolId,
+    };
+  }
+
   const nodes = filteredGraph.nodes.map((node) =>
     toArchitectureNode(node, input.rootSymbolId),
   );

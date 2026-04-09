@@ -227,6 +227,8 @@ const symbolGraph = createGraphEnvelope({
     },
   ],
   summary: {
+    nodeCount: 7,
+    edgeCount: 6,
     rootNodeIds: ["symbol:apps/api/src/services/user-service.ts#listUsers"],
     confidence: {
       proven: 4,

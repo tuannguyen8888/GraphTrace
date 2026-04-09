@@ -47,12 +47,14 @@ export function extractExecutionFlow(options: {
   const visit = (node: ts.Node) => {
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
       const sourceId = symbolIdFromDeclaration(node, normalizedFilePath);
+      const initializer = node.initializer;
       if (
         sourceId &&
-        ts.isCallExpression(node.initializer) &&
-        node.initializer.arguments.length > 0
+        initializer &&
+        ts.isCallExpression(initializer) &&
+        initializer.arguments.length > 0
       ) {
-        for (const argument of node.initializer.arguments) {
+        for (const argument of initializer.arguments) {
           const targetId = resolveSymbolId(
             argument,
             options.workspaceRoot,
@@ -71,7 +73,7 @@ export function extractExecutionFlow(options: {
               provenance: {
                 kind: "wrapper-handoff",
                 source: "typescript-checker",
-                evidence: [node.initializer.getText(sourceFile)],
+                evidence: [initializer.getText(sourceFile)],
               },
             });
           }
