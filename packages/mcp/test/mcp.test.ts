@@ -68,7 +68,10 @@ describe("mcp", () => {
         "get_routes",
         "get_status",
         "get_symbol_context",
+        "graphtrace_explain_edge",
+        "graphtrace_get_execution_context",
         "graphtrace_get_symbol",
+        "graphtrace_get_symbol_impact",
         "graphtrace_search_symbols",
         "list_packages",
         "run_index",
@@ -268,6 +271,29 @@ describe("mcp", () => {
           symbolName: "createReporter",
         },
       });
+      const execution = await client.callTool({
+        name: "graphtrace_get_execution_context",
+        arguments: {
+          symbolId: "symbol:apps/api/src/services/user-service.ts#listUsers",
+          maxNodes: 10,
+          maxEdges: 10,
+        },
+      });
+      const impact = await client.callTool({
+        name: "graphtrace_get_symbol_impact",
+        arguments: {
+          symbolId: "symbol:apps/api/src/routes/users.ts#auditedListUsers",
+          maxNodes: 2,
+          maxEdges: 1,
+        },
+      });
+      const edge = await client.callTool({
+        name: "graphtrace_explain_edge",
+        arguments: {
+          edgeId:
+            "edge:routes_to:GET /users->symbol:apps/api/src/routes/users.ts#auditedListUsers",
+        },
+      });
 
       const searchPayload = search.structuredContent as {
         items?: Array<{ id?: string; kind?: string }>;
@@ -281,6 +307,26 @@ describe("mcp", () => {
         items?: Array<{ id?: string; filePath?: string }>;
         graph?: {
           nodes?: Array<{ id?: string }>;
+        };
+      };
+      const executionPayload = execution.structuredContent as {
+        graph?: {
+          nodes?: Array<{ id?: string; kind?: string }>;
+        };
+      };
+      const impactPayload = impact.structuredContent as {
+        graph?: {
+          summary?: {
+            truncated?: {
+              nodeLimitReached?: boolean;
+            };
+          };
+        };
+      };
+      const edgePayload = edge.structuredContent as {
+        id?: string;
+        provenance?: {
+          kind?: string;
         };
       };
 
@@ -307,6 +353,26 @@ describe("mcp", () => {
           }),
         ]),
       );
+      expect(execution.isError).not.toBe(true);
+      expect(executionPayload.graph?.nodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "GET /users",
+            kind: "route",
+          }),
+        ]),
+      );
+      expect(impact.isError).not.toBe(true);
+      expect(
+        impactPayload.graph?.summary?.truncated?.nodeLimitReached,
+      ).toBe(true);
+      expect(edge.isError).not.toBe(true);
+      expect(edgePayload).toMatchObject({
+        id: "edge:routes_to:GET /users->symbol:apps/api/src/routes/users.ts#auditedListUsers",
+        provenance: {
+          kind: "route-handler",
+        },
+      });
     } finally {
       await transport.close().catch(() => undefined);
     }

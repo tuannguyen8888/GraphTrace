@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import Fastify, { type FastifyInstance } from "fastify";
 
+import type { SymbolLocator } from "@graphtrace/shared";
 import {
   type createQueryEngine,
   withWorkspaceQueryEngine,
@@ -195,6 +196,43 @@ function registerSingleWorkspaceRoutes(
         : engine.search(query, kind || undefined),
     );
   });
+  app.get("/api/symbols/search", async (request) => {
+    const { q = "" } = request.query as { q?: string };
+    return withQueryEngine((engine) => engine.searchSymbols(String(q)));
+  });
+  app.get("/api/symbols/get", async (request) => {
+    return withQueryEngine((engine) =>
+      engine.getSymbol(symbolLocatorFromQuery(request.query)),
+    );
+  });
+  app.get("/api/symbols/execution", async (request) => {
+    const { maxNodes, maxEdges } = request.query as {
+      maxNodes?: string;
+      maxEdges?: string;
+    };
+    return withQueryEngine((engine) =>
+      engine.executionContextFromSymbol(symbolLocatorFromQuery(request.query), {
+        maxNodes: maxNodes ? Number(maxNodes) : undefined,
+        maxEdges: maxEdges ? Number(maxEdges) : undefined,
+      }),
+    );
+  });
+  app.get("/api/symbols/impact", async (request) => {
+    const { maxNodes, maxEdges } = request.query as {
+      maxNodes?: string;
+      maxEdges?: string;
+    };
+    return withQueryEngine((engine) =>
+      engine.impactFromSymbol(symbolLocatorFromQuery(request.query), {
+        maxNodes: maxNodes ? Number(maxNodes) : undefined,
+        maxEdges: maxEdges ? Number(maxEdges) : undefined,
+      }),
+    );
+  });
+  app.get("/api/symbols/edge", async (request) => {
+    const { edgeId = "" } = request.query as { edgeId?: string };
+    return withQueryEngine((engine) => engine.explainEdge(edgeId));
+  });
   app.get("/api/routes", async (request) => {
     const packageName = String(
       (request.query as { package?: string }).package ?? "",
@@ -288,6 +326,35 @@ function registerSingleWorkspaceRoutes(
         : engine.flow(target, depth ? Number(depth) : undefined),
     );
   });
+}
+
+function symbolLocatorFromQuery(query: unknown): SymbolLocator {
+  const value = (query ?? {}) as {
+    symbolId?: string;
+    filePath?: string;
+    symbolName?: string;
+    line?: string | number;
+    column?: string | number;
+  };
+
+  if (value.symbolId) {
+    return {
+      symbolId: String(value.symbolId),
+    };
+  }
+
+  if (value.filePath && value.symbolName) {
+    return {
+      filePath: String(value.filePath),
+      symbolName: String(value.symbolName),
+    };
+  }
+
+  return {
+    filePath: String(value.filePath ?? ""),
+    line: Number(value.line ?? 0),
+    column: Number(value.column ?? 0),
+  };
 }
 
 function registerWorkspaceScopedRoutes(

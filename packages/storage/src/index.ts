@@ -25,7 +25,7 @@ import {
   pathBelongsToRepository,
 } from "@graphtrace/shared";
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 interface EdgeRow {
   id: string;
@@ -60,6 +60,7 @@ interface SymbolRow {
 }
 
 interface RouteRow {
+  storage_id?: string;
   id: string;
   method: string;
   path: string;
@@ -483,9 +484,11 @@ export class GraphStore {
   }
 
   upsertRoute(record: RouteItem): void {
+    const storageId = routeStorageId(record.id, record.filePath);
     this.db
       .prepare(`
         INSERT INTO routes (
+          storage_id,
           id,
           method,
           path,
@@ -497,8 +500,8 @@ export class GraphStore {
           confidence,
           metadata_json
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(storage_id) DO UPDATE SET
           method = excluded.method,
           path = excluded.path,
           handler_name = excluded.handler_name,
@@ -510,6 +513,7 @@ export class GraphStore {
           metadata_json = excluded.metadata_json
       `)
       .run(
+        storageId,
         record.id,
         record.method,
         record.path,
@@ -701,7 +705,7 @@ export class GraphStore {
 
   routeById(routeId: string): RouteItem | null {
     const row = this.db
-      .prepare("SELECT * FROM routes WHERE id = ?")
+      .prepare("SELECT * FROM routes WHERE id = ? ORDER BY file_path LIMIT 1")
       .get(routeId) as RouteRow | undefined;
     if (!row) {
       return null;
@@ -1141,6 +1145,14 @@ export class GraphStore {
       return { items: [] };
     }
 
+    return this.flowFromRouteItem(route, maxDepth);
+  }
+
+  private flowFromRouteItem(
+    route: RouteItem,
+    maxDepth: number,
+  ): QueryResult<GraphItem> {
+
     const startIds = new Set<string>([`file:${route.filePath}`]);
     if (route.handlerSymbolId) {
       const statement = this.db
@@ -1222,9 +1234,15 @@ export class GraphStore {
     routeId: string,
     maxDepth = 6,
   ): QueryResult<GraphItem> {
+    const route = this.routesByRepository(repositoryId).items.find(
+      (entry) => entry.id === routeId,
+    );
+    if (!route) {
+      return { items: [] };
+    }
     return this.filterGraphItemsByRepository(
       repositoryId,
-      this.flowFromRoute(routeId, maxDepth),
+      this.flowFromRouteItem(route, maxDepth),
     );
   }
 
@@ -1448,7 +1466,8 @@ export class GraphStore {
       );
 
       CREATE TABLE IF NOT EXISTS routes (
-        id TEXT PRIMARY KEY,
+        storage_id TEXT PRIMARY KEY,
+        id TEXT NOT NULL,
         method TEXT NOT NULL,
         path TEXT NOT NULL,
         handler_name TEXT NOT NULL,
@@ -1515,6 +1534,10 @@ function symbolSpanSize(symbol: SymbolDescriptor): number {
     (symbol.span.endLine - symbol.span.startLine) * 10_000 +
     (symbol.span.endColumn - symbol.span.startColumn)
   );
+}
+
+function routeStorageId(routeId: string, filePath: string): string {
+  return `${routeId}::${filePath}`;
 }
 
 export * from "./workspace-paths";
