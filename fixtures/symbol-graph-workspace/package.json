@@ -1,0 +1,7 @@
+{
+  "name": "symbol-graph-workspace",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ]
+}

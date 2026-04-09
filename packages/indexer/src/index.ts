@@ -22,6 +22,8 @@ import {
   toPosixPath,
 } from "@graphtrace/shared";
 import { openGraphStore } from "@graphtrace/storage";
+import { extractSymbols } from "./extract-symbols";
+import { buildInlineRouteHandlerId } from "./symbol-graph-types";
 import { type WorkspacePackageInfo, inspectWorkspace } from "./workspace";
 
 export { inspectWorkspace } from "./workspace";
@@ -265,67 +267,6 @@ function findOwningUnit(
           filePath.startsWith(`${unit.rootPath}/`)),
     )
     .sort((left, right) => right.rootPath.length - left.rootPath.length)[0];
-}
-
-function extractSymbols(sourceFile: ts.SourceFile, filePath: string) {
-  const symbols: Array<{
-    id: string;
-    name: string;
-    kind: string;
-    fileId: string;
-    filePath: string;
-    exported: boolean;
-  }> = [];
-
-  const visit = (node: ts.Node) => {
-    if (ts.isFunctionDeclaration(node) && node.name) {
-      symbols.push({
-        id: `symbol:${toPosixPath(filePath)}#${node.name.text}`,
-        name: node.name.text,
-        kind: "function",
-        fileId: `file:${toPosixPath(filePath)}`,
-        filePath: toPosixPath(filePath),
-        exported: (node.modifiers ?? []).some(
-          (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
-        ),
-      });
-    }
-    if (
-      ts.isMethodDeclaration(node) &&
-      node.name &&
-      ts.isIdentifier(node.name)
-    ) {
-      symbols.push({
-        id: `symbol:${toPosixPath(filePath)}#${node.name.text}`,
-        name: node.name.text,
-        kind: "method",
-        fileId: `file:${toPosixPath(filePath)}`,
-        filePath: toPosixPath(filePath),
-        exported: true,
-      });
-    }
-    if (ts.isVariableStatement(node)) {
-      const exported = (node.modifiers ?? []).some(
-        (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
-      );
-      for (const declaration of node.declarationList.declarations) {
-        if (ts.isIdentifier(declaration.name)) {
-          symbols.push({
-            id: `symbol:${toPosixPath(filePath)}#${declaration.name.text}`,
-            name: declaration.name.text,
-            kind: "variable",
-            fileId: `file:${toPosixPath(filePath)}`,
-            filePath: toPosixPath(filePath),
-            exported,
-          });
-        }
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
-
-  ts.forEachChild(sourceFile, visit);
-  return symbols;
 }
 
 function extractImports(
@@ -586,8 +527,13 @@ function extractHttpRoutes(
       id: `${method} ${path}`,
       method,
       path,
-      handlerName: `${receiver}_${method.toLowerCase()}_handler`,
-      handlerSymbolId: `symbol:${toPosixPath(filePath)}#${receiver}_${method.toLowerCase()}_handler`,
+      handlerName: `${receiver}.${method.toLowerCase()}.${path.replace(/^\/+/, "") || "root"}`,
+      handlerSymbolId: buildInlineRouteHandlerId(
+        filePath,
+        receiver,
+        method,
+        path,
+      ),
       filePath: toPosixPath(filePath),
       framework,
       unitId,
