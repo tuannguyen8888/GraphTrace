@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 
 import { ensureWorkspaceInitialized } from "@graphtrace/config";
+import { openGraphStore } from "@graphtrace/storage";
 import { indexWorkspace } from "../src/index";
 
 const fixtureRoot = join(process.cwd(), "fixtures", "express-prisma-workspace");
@@ -23,6 +24,11 @@ const backendFrontendFixtureRoot = join(
   "backend-frontend-workspace",
 );
 const mixedFixtureRoot = join(process.cwd(), "fixtures", "mixed-workspace");
+const symbolGraphFixtureRoot = join(
+  process.cwd(),
+  "fixtures",
+  "symbol-graph-workspace",
+);
 
 describe("indexWorkspace", () => {
   test("indexes packages, symbols, routes, and query edges from the fixture workspace", async () => {
@@ -145,5 +151,75 @@ describe("indexWorkspace", () => {
         }),
       ]),
     );
+  });
+
+  test("extracts stable callable symbols for ts and js fixtures", async () => {
+    await ensureWorkspaceInitialized(symbolGraphFixtureRoot);
+
+    const result = await indexWorkspace({
+      workspaceRoot: symbolGraphFixtureRoot,
+      full: true,
+    });
+
+    expect(result.summary.symbolCount).toBeGreaterThanOrEqual(8);
+
+    const store = openGraphStore(
+      join(symbolGraphFixtureRoot, ".graphtrace", "index.db"),
+    );
+
+    try {
+      expect(
+        store.symbolById(
+          "symbol:apps/api/src/services/user-service.ts#listUsers",
+        ),
+      ).toMatchObject({
+        kind: "function",
+        language: "typescript",
+        span: expect.objectContaining({
+          startLine: 1,
+        }),
+      });
+      expect(
+        store.symbolById(
+          "symbol:apps/api/src/services/user-service.ts#UsersController.archiveUser",
+        ),
+      ).toMatchObject({
+        kind: "method",
+        ownerSymbolId: "symbol:apps/api/src/services/user-service.ts#UsersController",
+        ownerKind: "class",
+      });
+      expect(
+        store.symbolById(
+          "symbol:apps/api/src/services/user-service.ts#metrics.trackRoute",
+        ),
+      ).toMatchObject({
+        kind: "method",
+        ownerSymbolId: "symbol:apps/api/src/services/user-service.ts#metrics",
+        ownerKind: "object",
+      });
+      expect(
+        store.symbolById(
+          "symbol:apps/api/src/services/user-service.ts#createReporter",
+        ),
+      ).toMatchObject({
+        kind: "function",
+      });
+      expect(
+        store.symbolById("symbol:apps/api/src/utils/legacy.js#legacyWorker"),
+      ).toMatchObject({
+        kind: "function",
+        language: "javascript",
+      });
+      expect(
+        store.symbolById(
+          "symbol:apps/api/src/routes/users.ts#router.post.reports",
+        ),
+      ).toMatchObject({
+        frameworkRole: "route-handler",
+        kind: "function",
+      });
+    } finally {
+      store.close();
+    }
   });
 });
