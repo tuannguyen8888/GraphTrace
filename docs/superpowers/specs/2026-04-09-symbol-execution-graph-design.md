@@ -663,6 +663,22 @@ In practice this means:
 - self-host and tawaco hardening
 - token-efficient MCP defaults and documentation updates
 
+## Planning Boundary
+
+This document is the umbrella architecture spec for the symbol execution graph
+initiative.
+
+To keep implementation planning scoped and actionable, the first implementation
+plan produced from this spec should cover only Milestone A:
+
+- schema expansion
+- TS and JS symbol extraction
+- direct calls and references
+- basic symbol-aware search and retrieval
+
+Milestones B and C should be planned in follow-up planning cycles after Milestone A
+is implemented and validated on GraphTrace and tawaco.
+
 ## Open Questions for Implementation Planning
 
 - which framework enrichers should be first-class in milestone A versus B
