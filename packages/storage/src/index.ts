@@ -420,6 +420,68 @@ export class GraphStore {
     return this.mapSymbolRow(row);
   }
 
+  symbolByFileAndName(
+    filePath: string,
+    symbolName: string,
+  ): SymbolDescriptor | null {
+    const row = this.db
+      .prepare(
+        `SELECT *
+         FROM symbols
+         WHERE file_path = ?
+           AND (name = ? OR display_name = ?)
+         ORDER BY exported DESC, span_start_line ASC
+         LIMIT 1`,
+      )
+      .get(filePath, symbolName, symbolName) as SymbolRow | undefined;
+
+    if (!row) {
+      return null;
+    }
+
+    return this.mapSymbolRow(row);
+  }
+
+  symbolByFilePosition(
+    filePath: string,
+    line: number,
+    column: number,
+  ): SymbolDescriptor | null {
+    const rows = this.db
+      .prepare(
+        `SELECT *
+         FROM symbols
+         WHERE file_path = ?
+           AND span_start_line IS NOT NULL
+           AND span_start_column IS NOT NULL
+           AND span_end_line IS NOT NULL
+           AND span_end_column IS NOT NULL
+           AND (
+             span_start_line < ?
+             OR (span_start_line = ? AND span_start_column <= ?)
+           )
+           AND (
+             span_end_line > ?
+             OR (span_end_line = ? AND span_end_column >= ?)
+           )`,
+      )
+      .all(
+        filePath,
+        line,
+        line,
+        column,
+        line,
+        line,
+        column,
+      ) as SymbolRow[];
+
+    const match = rows
+      .map((row) => this.mapSymbolRow(row))
+      .sort((left, right) => symbolSpanSize(left) - symbolSpanSize(right))[0];
+
+    return match ?? null;
+  }
+
   upsertRoute(record: RouteItem): void {
     this.db
       .prepare(`
@@ -1315,6 +1377,17 @@ export function openGraphStore(
   options?: GraphStoreOptions,
 ): GraphStore {
   return new GraphStore(dbPath, options);
+}
+
+function symbolSpanSize(symbol: SymbolDescriptor): number {
+  if (!symbol.span) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  return (
+    (symbol.span.endLine - symbol.span.startLine) * 10_000 +
+    (symbol.span.endColumn - symbol.span.startColumn)
+  );
 }
 
 export * from "./workspace-paths";

@@ -1,12 +1,47 @@
 import { join } from "node:path";
 
 import { indexWorkspace } from "@graphtrace/indexer";
-import type { DependencyDirection } from "@graphtrace/shared";
-import { GRAPHTRACE_DB_PATH } from "@graphtrace/shared";
+import type {
+  DependencyDirection,
+  GraphItem,
+  QueryResult,
+  SymbolDescriptor,
+  SymbolLocator,
+} from "@graphtrace/shared";
+import { createGraphEnvelope, GRAPHTRACE_DB_PATH } from "@graphtrace/shared";
 import type { GraphStore } from "@graphtrace/storage";
 import { openGraphStore } from "@graphtrace/storage";
 
 export function createQueryEngine(store: GraphStore) {
+  const resolveSymbol = (locator: SymbolLocator): SymbolDescriptor | null => {
+    if ("symbolId" in locator) {
+      return store.symbolById(locator.symbolId);
+    }
+
+    if ("symbolName" in locator) {
+      return store.symbolByFileAndName(locator.filePath, locator.symbolName);
+    }
+
+    return store.symbolByFilePosition(
+      locator.filePath,
+      locator.line,
+      locator.column,
+    );
+  };
+
+  const zeroHopSymbolResult = (
+    symbols: SymbolDescriptor[],
+  ): QueryResult<SymbolDescriptor> => ({
+    items: symbols,
+    graph: createGraphEnvelope({
+      nodes: symbols.map(toSymbolGraphItem),
+      summary: {
+        rootNodeIds: symbols.map((symbol) => symbol.id),
+        confidence: {},
+      },
+    }),
+  });
+
   return {
     search(query: string, kind?: string) {
       return store.search(query, kind);
@@ -68,6 +103,33 @@ export function createQueryEngine(store: GraphStore) {
     },
     getSymbolContext(query: string) {
       return store.search(query);
+    },
+    searchSymbols(query: string) {
+      return zeroHopSymbolResult(
+        store.search(query, "symbol").items
+          .map((item) => store.symbolById(item.id))
+          .filter((item): item is SymbolDescriptor => item !== null),
+      );
+    },
+    getSymbol(locator: SymbolLocator) {
+      const symbol = resolveSymbol(locator);
+      return zeroHopSymbolResult(symbol ? [symbol] : []);
+    },
+    getSymbolNeighbors(locator: SymbolLocator): QueryResult<GraphItem> {
+      const symbol = resolveSymbol(locator);
+
+      if (!symbol) {
+        return {
+          items: [],
+          graph: createGraphEnvelope(),
+        };
+      }
+
+      const graph = store.symbolNeighbors(symbol.id);
+      return {
+        items: graph.nodes,
+        graph,
+      };
     },
     status(workspaceRoot: string, dbPath: string) {
       return {
@@ -137,4 +199,14 @@ export function withWorkspaceQueryEngineForDbPath<T>(
   } finally {
     store.close();
   }
+}
+
+function toSymbolGraphItem(symbol: SymbolDescriptor): GraphItem {
+  return {
+    id: symbol.id,
+    kind: "symbol",
+    label: symbol.displayName,
+    path: symbol.filePath,
+    symbol,
+  };
 }

@@ -9,6 +9,11 @@ import { indexWorkspace } from "@graphtrace/indexer";
 
 const repoRoot = process.cwd();
 const fixtureRoot = join(repoRoot, "fixtures", "express-prisma-workspace");
+const symbolGraphFixtureRoot = join(
+  repoRoot,
+  "fixtures",
+  "symbol-graph-workspace",
+);
 const cliEntry = join(repoRoot, "packages", "cli", "src", "bin.ts");
 
 interface ToolGraphItem {
@@ -63,6 +68,8 @@ describe("mcp", () => {
         "get_routes",
         "get_status",
         "get_symbol_context",
+        "graphtrace_get_symbol",
+        "graphtrace_search_symbols",
         "list_packages",
         "run_index",
         "search_code",
@@ -221,6 +228,84 @@ describe("mcp", () => {
     } catch (error) {
       throw new Error(
         `MCP integration failed.\nSTDERR:\n${stderr || "<empty>"}\nCAUSE:${error instanceof Error ? ` ${error.message}` : ` ${String(error)}`}`,
+      );
+    } finally {
+      await transport.close().catch(() => undefined);
+    }
+  }, 20_000);
+
+  test("exposes symbol search and lookup tools", async () => {
+    await ensureWorkspaceInitialized(symbolGraphFixtureRoot);
+    await indexWorkspace({ workspaceRoot: symbolGraphFixtureRoot, full: true });
+
+    const transport = new StdioClientTransport({
+      command: "pnpm",
+      args: ["exec", "node", "--import", "tsx", cliEntry, "mcp"],
+      cwd: symbolGraphFixtureRoot,
+      stderr: "pipe",
+    });
+    const client = new Client(
+      {
+        name: "graphtrace-symbol-test-client",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {},
+      },
+    );
+
+    try {
+      await client.connect(transport);
+
+      const search = await client.callTool({
+        name: "graphtrace_search_symbols",
+        arguments: { query: "report" },
+      });
+      const getSymbol = await client.callTool({
+        name: "graphtrace_get_symbol",
+        arguments: {
+          filePath: "apps/api/src/services/user-service.ts",
+          symbolName: "createReporter",
+        },
+      });
+
+      const searchPayload = search.structuredContent as {
+        items?: Array<{ id?: string; kind?: string }>;
+        graph?: {
+          summary?: {
+            nodeCount?: number;
+          };
+        };
+      };
+      const getSymbolPayload = getSymbol.structuredContent as {
+        items?: Array<{ id?: string; filePath?: string }>;
+        graph?: {
+          nodes?: Array<{ id?: string }>;
+        };
+      };
+
+      expect(search.isError).not.toBe(true);
+      expect(searchPayload.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "symbol:apps/api/src/services/user-service.ts#createReporter",
+            kind: "function",
+          }),
+        ]),
+      );
+      expect(searchPayload.graph?.summary?.nodeCount).toBeGreaterThanOrEqual(1);
+      expect(getSymbol.isError).not.toBe(true);
+      expect(getSymbolPayload.items).toEqual([
+        expect.objectContaining({
+          id: "symbol:apps/api/src/services/user-service.ts#createReporter",
+        }),
+      ]);
+      expect(getSymbolPayload.graph?.nodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "symbol:apps/api/src/services/user-service.ts#createReporter",
+          }),
+        ]),
       );
     } finally {
       await transport.close().catch(() => undefined);
