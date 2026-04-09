@@ -11,6 +11,11 @@ const symbolGraphFixtureRoot = join(
   "fixtures",
   "symbol-graph-workspace",
 );
+const reactCallbackFixtureRoot = join(
+  process.cwd(),
+  "fixtures",
+  "react-callback-workspace",
+);
 
 describe("symbol graph server", () => {
   test("serves symbol graph search, lookup, execution, impact, and edge explanation endpoints", async () => {
@@ -83,6 +88,43 @@ describe("symbol graph server", () => {
           kind: "route-handler",
         },
       });
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("keeps workspace callback investigations bounded and free of external library noise", async () => {
+    await ensureWorkspaceInitialized(reactCallbackFixtureRoot);
+    await indexWorkspace({
+      workspaceRoot: reactCallbackFixtureRoot,
+      full: true,
+    });
+
+    const app = createGraphTraceApp({
+      workspaceRoot: reactCallbackFixtureRoot,
+    });
+
+    try {
+      const execution = await app.inject({
+        method: "GET",
+        url: `/api/symbols/execution?filePath=${encodeURIComponent("apps/web/src/dashboard.tsx")}&symbolName=Dashboard&maxNodes=6&maxEdges=6`,
+      });
+      const payload = execution.json();
+
+      expect(payload.graph.nodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "symbol:apps/web/src/dashboard.tsx#Dashboard.loadProfile",
+          }),
+        ]),
+      );
+      expect(payload.graph.summary.nodeCount).toBeLessThanOrEqual(6);
+      expect(payload.graph.summary.edgeCount).toBeLessThanOrEqual(6);
+      expect(
+        payload.graph.nodes.every(
+          (node: { id: string }) => !node.id.includes("node_modules/"),
+        ),
+      ).toBe(true);
     } finally {
       await app.close();
     }

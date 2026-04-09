@@ -12,6 +12,11 @@ const symbolGraphFixtureRoot = join(
   "fixtures",
   "symbol-graph-workspace",
 );
+const reactCallbackFixtureRoot = join(
+  process.cwd(),
+  "fixtures",
+  "react-callback-workspace",
+);
 
 describe("symbol query engine", () => {
   test("searches symbols by name and returns a zero-hop graph envelope", async () => {
@@ -175,6 +180,46 @@ describe("symbol query engine", () => {
           kind: "route-handler",
         }),
       });
+    } finally {
+      store.close();
+    }
+  });
+
+  test("keeps callback-heavy execution graphs focused on workspace-local symbols", async () => {
+    await ensureWorkspaceInitialized(reactCallbackFixtureRoot);
+    await indexWorkspace({
+      workspaceRoot: reactCallbackFixtureRoot,
+      full: true,
+    });
+
+    const store = openGraphStore(
+      join(reactCallbackFixtureRoot, ".graphtrace", "index.db"),
+    );
+
+    try {
+      const result = createQueryEngine(store).executionContextFromSymbol(
+        {
+          filePath: "apps/web/src/dashboard.tsx",
+          symbolName: "Dashboard",
+        },
+        { maxNodes: 6, maxEdges: 6 },
+      );
+
+      expect(result.graph).toMatchObject({
+        nodes: expect.arrayContaining([
+          expect.objectContaining({
+            id: "symbol:apps/web/src/dashboard.tsx#Dashboard.loadProfile",
+          }),
+          expect.objectContaining({
+            id: "symbol:apps/web/src/dashboard.tsx#services.profile.loadProfile",
+          }),
+        ]),
+      });
+      expect(result.graph?.summary.nodeCount).toBeLessThanOrEqual(6);
+      expect(result.graph?.summary.edgeCount).toBeLessThanOrEqual(6);
+      expect(
+        result.graph?.nodes.every((node) => !node.id.includes("node_modules/")),
+      ).toBe(true);
     } finally {
       store.close();
     }

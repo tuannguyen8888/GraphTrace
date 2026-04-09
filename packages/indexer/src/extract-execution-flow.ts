@@ -142,11 +142,15 @@ function resolveSymbolId(
       : symbol;
 
   for (const declaration of resolved.declarations ?? []) {
+    const declarationFilePath = toPosixPath(
+      relativePath(workspaceRoot, declaration.getSourceFile().fileName),
+    );
+    if (!isWorkspaceSourcePath(declarationFilePath)) {
+      continue;
+    }
     const symbolId = symbolIdFromDeclaration(
       declaration,
-      toPosixPath(
-        relativePath(workspaceRoot, declaration.getSourceFile().fileName),
-      ),
+      declarationFilePath,
     );
     if (symbolId) {
       return symbolId;
@@ -195,5 +199,14 @@ function spanSize(symbol: SymbolDescriptor): number {
   return (
     (symbol.span.endLine - symbol.span.startLine) * 10_000 +
     (symbol.span.endColumn - symbol.span.startColumn)
+  );
+}
+
+function isWorkspaceSourcePath(filePath: string): boolean {
+  return !(
+    filePath === ".." ||
+    filePath.startsWith("../") ||
+    filePath === "node_modules" ||
+    filePath.startsWith("node_modules/")
   );
 }
