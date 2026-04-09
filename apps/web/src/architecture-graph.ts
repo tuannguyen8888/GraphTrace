@@ -23,6 +23,7 @@ export interface ArchitectureGraphNode {
   kind: string;
   label: string;
   path?: string;
+  actionId?: string;
   cluster:
     | "focus"
     | "packages"
@@ -38,6 +39,7 @@ export interface ArchitectureGraphEdge {
   sourceId: string;
   targetId: string;
   kind: keyof GraphEdgeFilters;
+  confidenceLabel?: string;
 }
 
 export interface PositionedArchitectureGraphNode extends ArchitectureGraphNode {

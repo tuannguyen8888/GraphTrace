@@ -20,6 +20,9 @@ export function SymbolGraphInspector(props: SymbolGraphInspectorProps) {
           <div className="inspector-section-heading">
             <h3>{section.title}</h3>
           </div>
+          {section.warning ? (
+            <div className="inspector-warning">{section.warning}</div>
+          ) : null}
 
           {section.items.length === 0 ? (
             <div className="inspector-empty">{messages.app.noItemsInTrace}</div>

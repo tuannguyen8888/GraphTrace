@@ -10,6 +10,11 @@ import type {
   WorkspaceStatus,
 } from "./view-model";
 
+interface SymbolGraphLimits {
+  maxNodes?: number;
+  maxEdges?: number;
+}
+
 export async function fetchJson<T>(
   url: string,
   init?: RequestInit,
@@ -163,9 +168,17 @@ export function getWorkspaceSymbolExecution(
   workspaceId: string,
   symbolId: string,
   refreshNonce = 0,
+  limits: SymbolGraphLimits = {},
 ) {
+  const query = new URLSearchParams({
+    symbolId,
+    maxNodes: String(limits.maxNodes ?? 18),
+    maxEdges: String(limits.maxEdges ?? 24),
+    refresh: String(refreshNonce),
+  });
+
   return fetchJson<QueryResult<GraphItem>>(
-    `/api/workspaces/${encodeURIComponent(workspaceId)}/symbols/execution?symbolId=${encodeURIComponent(symbolId)}&maxNodes=18&maxEdges=24&refresh=${refreshNonce}`,
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/symbols/execution?${query.toString()}`,
   );
 }
 
@@ -173,9 +186,17 @@ export function getWorkspaceSymbolImpact(
   workspaceId: string,
   symbolId: string,
   refreshNonce = 0,
+  limits: SymbolGraphLimits = {},
 ) {
+  const query = new URLSearchParams({
+    symbolId,
+    maxNodes: String(limits.maxNodes ?? 18),
+    maxEdges: String(limits.maxEdges ?? 24),
+    refresh: String(refreshNonce),
+  });
+
   return fetchJson<QueryResult<GraphItem>>(
-    `/api/workspaces/${encodeURIComponent(workspaceId)}/symbols/impact?symbolId=${encodeURIComponent(symbolId)}&maxNodes=18&maxEdges=24&refresh=${refreshNonce}`,
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/symbols/impact?${query.toString()}`,
   );
 }
 

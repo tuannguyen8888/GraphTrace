@@ -16,7 +16,10 @@ import {
   buildRouteHref,
   parseRouteState,
 } from "../../../apps/web/src/route-state";
-import { buildSymbolInspectorSections } from "../../../apps/web/src/symbol-graph-view-model";
+import {
+  buildSymbolGraphControlsState,
+  buildSymbolInspectorSections,
+} from "../../../apps/web/src/symbol-graph-view-model";
 import type {
   GraphItem,
   PackageSummary,
@@ -275,6 +278,12 @@ const symbolGraph = createGraphEnvelope({
       path: "apps/api/src/services/user-service.ts",
     },
     {
+      id: "symbol:apps/api/src/routes/users.ts#legacyWrapper",
+      kind: "symbol",
+      label: "legacyWrapper",
+      path: "apps/api/src/routes/users.ts",
+    },
+    {
       id: "symbol:apps/api/src/services/user-service.ts#prisma",
       kind: "symbol",
       label: "prisma",
@@ -314,6 +323,16 @@ const symbolGraph = createGraphEnvelope({
       confidenceLabel: "proven",
     },
     {
+      id: "edge:calls:legacyWrapper->listUsers",
+      type: "calls",
+      sourceId: "symbol:apps/api/src/routes/users.ts#legacyWrapper",
+      sourceKind: "symbol",
+      targetId: "symbol:apps/api/src/services/user-service.ts#listUsers",
+      targetKind: "symbol",
+      confidence: 0.45,
+      confidenceLabel: "inferred-weak",
+    },
+    {
       id: "edge:references:listUsers->prisma",
       type: "references",
       sourceId: "symbol:apps/api/src/services/user-service.ts#listUsers",
@@ -350,6 +369,7 @@ const symbolGraph = createGraphEnvelope({
     confidence: {
       proven: 4,
       "inferred-strong": 1,
+      "inferred-weak": 1,
     },
   },
 });
@@ -682,6 +702,55 @@ describe("web ui view-model", () => {
         id: "sinks",
         items: [],
       }),
+    ]);
+  });
+
+  test("surfaces weak-edge warnings in the inspector and exposes control actions for impact and expansion", () => {
+    const sections = buildSymbolInspectorSections({
+      graph: symbolGraph,
+      rootSymbolId: "symbol:apps/api/src/services/user-service.ts#listUsers",
+      mode: "execution",
+      confidenceFilter: "all",
+      weakConfidenceWarning: "Contains weak-confidence edges.",
+      labels: {
+        callers: "Callers",
+        callees: "Callees",
+        routes: "Routes",
+        sinks: "Sinks",
+      },
+    });
+    const controls = buildSymbolGraphControlsState({
+      graph: createGraphEnvelope({
+        ...symbolGraph,
+        summary: {
+          ...symbolGraph.summary,
+          truncated: {
+            edgeLimitReached: true,
+            omittedEdgeCount: 2,
+          },
+        },
+      }),
+      mode: "execution",
+      confidenceFilter: "strong",
+      labels: {
+        showWeakerEdges: "Show weaker edges",
+        expandCallers: "Expand callers",
+        expandCallees: "Expand callees",
+        openImpact: "Open impact",
+      },
+    });
+
+    expect(sections[0]).toEqual(
+      expect.objectContaining({
+        id: "callers",
+        warning: "Contains weak-confidence edges.",
+      }),
+    );
+    expect(controls.actions.map((action) => action.id)).toEqual([
+      "show-weaker-edges",
+      "expand-callers",
+      "expand-callees",
+      "open-impact",
     ]);
   });
 

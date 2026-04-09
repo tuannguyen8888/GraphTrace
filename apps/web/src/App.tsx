@@ -48,6 +48,7 @@ import { StarterGuide } from "./starter-guide";
 import { SymbolGraphControls } from "./symbol-graph-controls";
 import { SymbolGraphInspector } from "./symbol-graph-inspector";
 import type {
+  SymbolGraphActionId,
   SymbolGraphConfidenceFilter,
   SymbolGraphMode,
 } from "./symbol-graph-types";
@@ -82,6 +83,11 @@ type InspectorMode =
   | { type: "idle" }
   | { type: "route"; route: RouteSummary }
   | { type: "search"; item: SearchResult };
+
+const DEFAULT_SYMBOL_GRAPH_LIMITS = {
+  maxNodes: 18,
+  maxEdges: 24,
+};
 
 export function App() {
   const [locale, setLocale] = useState<Locale>(() => readLocaleFromLocation());
@@ -126,6 +132,9 @@ export function App() {
     useState<SymbolGraphMode>("execution");
   const [symbolConfidenceFilter, setSymbolConfidenceFilter] =
     useState<SymbolGraphConfidenceFilter>("strong");
+  const [symbolGraphLimits, setSymbolGraphLimits] = useState(
+    DEFAULT_SYMBOL_GRAPH_LIMITS,
+  );
   const [symbolGraphResult, setSymbolGraphResult] =
     useState<QueryResult<GraphItem> | null>(null);
   const [workspaceError, setWorkspaceError] = useState("");
@@ -218,6 +227,10 @@ export function App() {
           mode: symbolGraphMode,
           rootSymbolId: inspector.item.id,
           confidenceFilter: symbolConfidenceFilter,
+          labels: {
+            expandCallers: messages.app.symbolGraphExpandCallers,
+            expandCallees: messages.app.symbolGraphExpandCallees,
+          },
         })
       : null;
   const activeGraph = symbolGraph ?? architectureGraph;
@@ -269,6 +282,7 @@ export function App() {
             routes: messages.app.symbolGraphRoutes,
             sinks: messages.app.symbolGraphSinks,
           },
+          weakConfidenceWarning: messages.app.symbolGraphWeakWarning,
         })
       : [];
 
@@ -462,6 +476,7 @@ export function App() {
                   selectedWorkspaceId,
                   inspector.item.id,
                   refreshNonce,
+                  symbolGraphLimits,
                 )
               : symbolGraphMode === "reference"
                 ? await getWorkspaceSymbolNeighbors(
@@ -473,6 +488,7 @@ export function App() {
                     selectedWorkspaceId,
                     inspector.item.id,
                     refreshNonce,
+                    symbolGraphLimits,
                   );
 
           if (cancelled) {
@@ -557,6 +573,7 @@ export function App() {
     refreshNonce,
     selectedRepositoryId,
     selectedWorkspaceId,
+    symbolGraphLimits,
     symbolGraphMode,
   ]);
 
@@ -644,6 +661,7 @@ export function App() {
         setInspector({ type: "idle" });
         setSymbolGraphMode("execution");
         setSymbolConfidenceFilter("strong");
+        setSymbolGraphLimits(DEFAULT_SYMBOL_GRAPH_LIMITS);
         setSymbolGraphResult(null);
         setRefreshNonce((value) => value + 1);
         setWorkspaceError("");
@@ -658,6 +676,24 @@ export function App() {
       });
     } finally {
       setAddingWorkspace(false);
+    }
+  };
+
+  const handleSymbolGraphAction = (actionId: SymbolGraphActionId) => {
+    switch (actionId) {
+      case "show-weaker-edges":
+        setSymbolConfidenceFilter("all");
+        return;
+      case "open-impact":
+        setSymbolGraphMode("impact");
+        return;
+      case "expand-callers":
+      case "expand-callees":
+        setSymbolGraphLimits((current) => ({
+          maxNodes: current.maxNodes + 12,
+          maxEdges: current.maxEdges + 18,
+        }));
+        return;
     }
   };
 
@@ -684,6 +720,7 @@ export function App() {
             setInspector({ type: "idle" });
             setSymbolGraphMode("execution");
             setSymbolConfidenceFilter("strong");
+            setSymbolGraphLimits(DEFAULT_SYMBOL_GRAPH_LIMITS);
             setSymbolGraphResult(null);
           });
         }}
@@ -764,6 +801,7 @@ export function App() {
                     setInspector({ type: "idle" });
                     setSymbolGraphMode("execution");
                     setSymbolConfidenceFilter("strong");
+                    setSymbolGraphLimits(DEFAULT_SYMBOL_GRAPH_LIMITS);
                     setRouteFlow([]);
                     setDependencyItems([]);
                     setImpactItems([]);
@@ -1012,13 +1050,21 @@ export function App() {
                       symbolLabel={inspector.item.label}
                       onModeChange={setSymbolGraphMode}
                       onConfidenceFilterChange={setSymbolConfidenceFilter}
+                      onAction={handleSymbolGraphAction}
                     />
                   ) : undefined
                 }
                 onSelectNode={(node) => {
+                  if (node.actionId) {
+                    handleSymbolGraphAction(
+                      node.actionId as SymbolGraphActionId,
+                    );
+                    return;
+                  }
                   if (node.kind === "symbol") {
                     setSymbolGraphMode("execution");
                     setSymbolConfidenceFilter("strong");
+                    setSymbolGraphLimits(DEFAULT_SYMBOL_GRAPH_LIMITS);
                   }
                   inspectGraphItem(
                     {
@@ -1153,6 +1199,7 @@ export function App() {
                             if (item.kind === "symbol") {
                               setSymbolGraphMode("execution");
                               setSymbolConfidenceFilter("strong");
+                              setSymbolGraphLimits(DEFAULT_SYMBOL_GRAPH_LIMITS);
                             }
                             inspectSearchResult(item, routes, setInspector);
                           }}
@@ -1367,6 +1414,7 @@ export function App() {
                       if (item.kind === "symbol") {
                         setSymbolGraphMode("execution");
                         setSymbolConfidenceFilter("strong");
+                        setSymbolGraphLimits(DEFAULT_SYMBOL_GRAPH_LIMITS);
                       }
                       inspectGraphItem(
                         item,
