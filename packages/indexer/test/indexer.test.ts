@@ -176,7 +176,7 @@ describe("indexWorkspace", () => {
         kind: "function",
         language: "typescript",
         span: expect.objectContaining({
-          startLine: 1,
+          startLine: 9,
         }),
       });
       expect(
@@ -253,6 +253,53 @@ describe("indexWorkspace", () => {
             sourceId: "symbol:apps/api/src/routes/users.ts#router.post.reports",
             targetId: "symbol:apps/api/src/services/user-service.ts#metrics.trackRoute",
             confidenceLabel: "proven",
+          }),
+        ]),
+      });
+    } finally {
+      store.close();
+    }
+  });
+
+  test("stitches route, wrapper, service, and query sink execution flow", async () => {
+    await ensureWorkspaceInitialized(symbolGraphFixtureRoot);
+
+    await indexWorkspace({
+      workspaceRoot: symbolGraphFixtureRoot,
+      full: true,
+    });
+
+    const store = openGraphStore(
+      join(symbolGraphFixtureRoot, ".graphtrace", "index.db"),
+    );
+
+    try {
+      expect(
+        store.symbolNeighbors("symbol:apps/api/src/routes/users.ts#auditedListUsers"),
+      ).toMatchObject({
+        edges: expect.arrayContaining([
+          expect.objectContaining({
+            type: "routes_to",
+            sourceId: "GET /users",
+            targetId: "symbol:apps/api/src/routes/users.ts#auditedListUsers",
+          }),
+          expect.objectContaining({
+            type: "calls",
+            sourceId: "symbol:apps/api/src/routes/users.ts#auditedListUsers",
+            targetId: "symbol:apps/api/src/services/user-service.ts#listUsers",
+          }),
+        ]),
+      });
+      expect(
+        store.symbolNeighbors(
+          "symbol:apps/api/src/services/user-service.ts#listUsers",
+        ),
+      ).toMatchObject({
+        edges: expect.arrayContaining([
+          expect.objectContaining({
+            type: "queries",
+            sourceId: "symbol:apps/api/src/services/user-service.ts#listUsers",
+            targetId: "query:apps/api/src/services/user-service.ts#prisma.user.findMany(",
           }),
         ]),
       });

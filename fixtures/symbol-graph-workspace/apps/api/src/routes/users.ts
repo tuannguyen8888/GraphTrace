@@ -3,12 +3,14 @@ import {
   createReporter,
   listUsers,
   metrics,
+  withAudit,
 } from "../services/user-service.js";
 
 export const router = Router();
+const auditedListUsers = withAudit(listUsers);
 
 export function registerRoutes() {
-  router.get("/users", listUsers);
+  router.get("/users", auditedListUsers);
   router.post("/reports", async (request, response) => {
     const runReport = createReporter();
     const trackRoute = metrics.trackRoute;

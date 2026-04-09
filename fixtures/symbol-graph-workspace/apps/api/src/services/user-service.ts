@@ -1,5 +1,19 @@
-export function listUsers() {
-  return ["alice", "bob"];
+const prisma = {
+  user: {
+    findMany() {
+      return ["alice", "bob"];
+    },
+  },
+};
+
+export async function listUsers() {
+  return prisma.user.findMany();
+}
+
+export function withAudit(handler: typeof listUsers) {
+  return async function auditedHandler() {
+    return handler();
+  };
 }
 
 export const createReporter = () => {
