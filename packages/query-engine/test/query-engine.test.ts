@@ -3,6 +3,11 @@ import { describe, expect, test } from "vitest";
 
 import { ensureWorkspaceInitialized } from "@graphtrace/config";
 import { indexWorkspace } from "@graphtrace/indexer";
+import type {
+  GraphEnvelope,
+  QueryResult,
+  SearchItem,
+} from "@graphtrace/shared";
 import { openGraphStore } from "@graphtrace/storage";
 import { createQueryEngine } from "../src/index";
 
@@ -17,6 +22,99 @@ const fastifyFixtureRoot = join(process.cwd(), "fixtures", "fastify-workspace");
 const selfHostRoot = process.cwd();
 
 describe("query engine", () => {
+  test("query results can include a symbol graph envelope alongside items", () => {
+    const result: QueryResult<SearchItem> = {
+      items: [
+        {
+          id: "symbol:apps/api/src/routes/users.ts#listUsers",
+          kind: "symbol",
+          label: "listUsers function apps/api/src/routes/users.ts",
+          path: "apps/api/src/routes/users.ts",
+          score: 100,
+        },
+      ],
+      graph: {
+        nodes: [
+          {
+            id: "symbol:apps/api/src/routes/users.ts#listUsers",
+            kind: "symbol",
+            label: "listUsers",
+            path: "apps/api/src/routes/users.ts",
+            symbol: {
+              id: "symbol:apps/api/src/routes/users.ts#listUsers",
+              name: "listUsers",
+              displayName: "listUsers",
+              kind: "function",
+              language: "typescript",
+              fileId: "file:apps/api/src/routes/users.ts",
+              filePath: "apps/api/src/routes/users.ts",
+              exported: true,
+              span: {
+                startLine: 4,
+                startColumn: 1,
+                endLine: 12,
+                endColumn: 2,
+              },
+            },
+          },
+        ],
+        edges: [
+          {
+            id: "edge:symbol:listUsers->query",
+            type: "queries",
+            sourceId: "symbol:apps/api/src/routes/users.ts#listUsers",
+            sourceKind: "symbol",
+            targetId: "query:apps/api/src/routes/users.ts#0",
+            targetKind: "query",
+            confidence: 1,
+            confidenceLabel: "proven",
+            provenance: {
+              kind: "static-call",
+              source: "typescript-checker",
+              evidence: ["CallExpression"],
+            },
+          },
+        ],
+        summary: {
+          nodeCount: 1,
+          edgeCount: 1,
+          rootNodeIds: ["symbol:apps/api/src/routes/users.ts#listUsers"],
+          confidence: {
+            proven: 1,
+          },
+        },
+      } satisfies GraphEnvelope,
+    };
+
+    expect(result.graph?.summary.nodeCount).toBe(1);
+    expect(result.graph?.edges[0]).toMatchObject({
+      confidenceLabel: "proven",
+    });
+  });
+
+  test("search results expose a graph envelope key for symbol-first consumers", async () => {
+    await ensureWorkspaceInitialized(fixtureRoot);
+    await indexWorkspace({ workspaceRoot: fixtureRoot, full: true });
+
+    const store = openGraphStore(join(fixtureRoot, ".graphtrace", "index.db"));
+
+    try {
+      const result = createQueryEngine(store).search("listUsers");
+
+      expect(result).toHaveProperty("graph");
+      expect(result.graph).toMatchObject({
+        nodes: expect.any(Array),
+        edges: expect.any(Array),
+        summary: expect.objectContaining({
+          nodeCount: expect.any(Number),
+          edgeCount: expect.any(Number),
+        }),
+      });
+    } finally {
+      store.close();
+    }
+  });
+
   test("search, routes, deps, impact, and flow work on the express fixture", async () => {
     await ensureWorkspaceInitialized(fixtureRoot);
     await indexWorkspace({ workspaceRoot: fixtureRoot, full: true });
