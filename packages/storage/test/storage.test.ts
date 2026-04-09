@@ -175,4 +175,138 @@ describe("storage", () => {
       writer.close();
     }
   });
+
+  test("persists rich symbol metadata and round-trips symbol edges", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "graphtrace-storage-"));
+    const store = openGraphStore(
+      join(workspaceRoot, ".graphtrace", "index.db"),
+    );
+
+    try {
+      store.upsertUnit({
+        id: "unit:apps/api",
+        rootPath: "apps/api",
+        displayName: "@fixture/api",
+        kind: "app",
+        language: "js-ts",
+        tooling: "pnpm",
+        indexingMode: "full",
+        confidence: 95,
+        signals: ["package.json"],
+        sourceRoots: ["apps/api/src"],
+        pluginMatches: [],
+      });
+      store.upsertPackage({
+        id: "package:apps/api",
+        name: "@fixture/api",
+        rootPath: "apps/api",
+        unitId: "unit:apps/api",
+      });
+      store.upsertFile({
+        id: "file:apps/api/src/routes/users.ts",
+        path: "apps/api/src/routes/users.ts",
+        packageId: "package:apps/api",
+        unitId: "unit:apps/api",
+        hash: "hash",
+      });
+
+      store.upsertSymbol({
+        id: "symbol:apps/api/src/routes/users.ts#usersController",
+        name: "UsersController",
+        displayName: "UsersController",
+        kind: "class",
+        language: "typescript",
+        fileId: "file:apps/api/src/routes/users.ts",
+        filePath: "apps/api/src/routes/users.ts",
+        exported: true,
+      });
+      store.upsertSymbol({
+        id: "symbol:apps/api/src/routes/users.ts#listUsers",
+        name: "listUsers",
+        displayName: "listUsers",
+        kind: "method",
+        language: "typescript",
+        fileId: "file:apps/api/src/routes/users.ts",
+        filePath: "apps/api/src/routes/users.ts",
+        exported: true,
+        ownerSymbolId: "symbol:apps/api/src/routes/users.ts#usersController",
+        ownerKind: "class",
+        signatureText: "(request, response) => Promise<void>",
+        frameworkRole: "route-handler",
+        span: {
+          startLine: 4,
+          startColumn: 3,
+          endLine: 12,
+          endColumn: 4,
+        },
+      });
+
+      store.upsertSymbolEdge({
+        id: "edge:symbol:listUsers->query",
+        type: "queries",
+        sourceId: "symbol:apps/api/src/routes/users.ts#listUsers",
+        sourceKind: "symbol",
+        targetId: "query:apps/api/src/routes/users.ts#0",
+        targetKind: "query",
+        confidence: 1,
+        confidenceLabel: "proven",
+        provenance: {
+          kind: "static-call",
+          source: "typescript-checker",
+          evidence: ["CallExpression", "ResolvedSignature"],
+        },
+      });
+
+      expect(store.symbolById("symbol:apps/api/src/routes/users.ts#listUsers"))
+        .toMatchObject({
+          ownerSymbolId: "symbol:apps/api/src/routes/users.ts#usersController",
+          ownerKind: "class",
+          signatureText: "(request, response) => Promise<void>",
+          frameworkRole: "route-handler",
+          span: {
+            startLine: 4,
+            endColumn: 4,
+          },
+        });
+
+      expect(
+        store.symbolNeighbors(
+          "symbol:apps/api/src/routes/users.ts#listUsers",
+        ),
+      ).toMatchObject({
+        nodes: expect.arrayContaining([
+          expect.objectContaining({
+            id: "symbol:apps/api/src/routes/users.ts#listUsers",
+            symbol: expect.objectContaining({
+              ownerSymbolId:
+                "symbol:apps/api/src/routes/users.ts#usersController",
+            }),
+          }),
+          expect.objectContaining({
+            id: "query:apps/api/src/routes/users.ts#0",
+            kind: "query",
+          }),
+        ]),
+        edges: [
+          expect.objectContaining({
+            id: "edge:symbol:listUsers->query",
+            confidenceLabel: "proven",
+            provenance: expect.objectContaining({
+              source: "typescript-checker",
+              evidence: ["CallExpression", "ResolvedSignature"],
+            }),
+          }),
+        ],
+        summary: expect.objectContaining({
+          nodeCount: 2,
+          edgeCount: 1,
+          confidence: expect.objectContaining({
+            proven: 1,
+          }),
+        }),
+      });
+    } finally {
+      store.close();
+    }
+  });
 });
