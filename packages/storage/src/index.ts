@@ -5,7 +5,10 @@ import { DatabaseSync } from "node:sqlite";
 import type {
   DependencyDirection,
   GraphEnvelope,
+  GraphEdgeDescriptor,
+  GraphEdgeProvenance,
   DiscoveredUnit,
+  GraphConfidenceLabel,
   GraphItem,
   IndexRunInfo,
   IndexSummary,
@@ -13,6 +16,8 @@ import type {
   RepositorySummary,
   RouteItem,
   SearchItem,
+  SourceSpan,
+  SymbolDescriptor,
 } from "@graphtrace/shared";
 import {
   createGraphEnvelope,
@@ -20,14 +25,38 @@ import {
   pathBelongsToRepository,
 } from "@graphtrace/shared";
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 interface EdgeRow {
+  id: string;
   type: string;
   source_id: string;
+  source_kind: string;
   target_id: string;
+  target_kind: string;
   confidence: number;
+  confidence_label: GraphConfidenceLabel;
+  provenance_json: string | null;
   metadata_json: string | null;
+}
+
+interface SymbolRow {
+  id: string;
+  name: string;
+  display_name: string;
+  kind: string;
+  language: SymbolDescriptor["language"];
+  file_id: string;
+  file_path: string;
+  exported: number;
+  owner_symbol_id: string | null;
+  owner_kind: string | null;
+  signature_text: string | null;
+  framework_role: string | null;
+  span_start_line: number | null;
+  span_start_column: number | null;
+  span_end_line: number | null;
+  span_end_column: number | null;
 }
 
 interface RouteRow {
@@ -303,30 +332,92 @@ export class GraphStore {
   upsertSymbol(record: {
     id: string;
     name: string;
+    displayName?: string;
     kind: string;
+    language?: SymbolDescriptor["language"];
     fileId: string;
     filePath: string;
     exported: boolean;
+    ownerSymbolId?: string;
+    ownerKind?: string;
+    signatureText?: string;
+    frameworkRole?: string;
+    span?: SourceSpan;
   }): void {
     this.db
       .prepare(`
-        INSERT INTO symbols (id, name, kind, file_id, exported)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET name = excluded.name, kind = excluded.kind, file_id = excluded.file_id, exported = excluded.exported
+        INSERT INTO symbols (
+          id,
+          name,
+          display_name,
+          kind,
+          language,
+          file_id,
+          file_path,
+          exported,
+          owner_symbol_id,
+          owner_kind,
+          signature_text,
+          framework_role,
+          span_start_line,
+          span_start_column,
+          span_end_line,
+          span_end_column
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          name = excluded.name,
+          display_name = excluded.display_name,
+          kind = excluded.kind,
+          language = excluded.language,
+          file_id = excluded.file_id,
+          file_path = excluded.file_path,
+          exported = excluded.exported,
+          owner_symbol_id = excluded.owner_symbol_id,
+          owner_kind = excluded.owner_kind,
+          signature_text = excluded.signature_text,
+          framework_role = excluded.framework_role,
+          span_start_line = excluded.span_start_line,
+          span_start_column = excluded.span_start_column,
+          span_end_line = excluded.span_end_line,
+          span_end_column = excluded.span_end_column
       `)
       .run(
         record.id,
         record.name,
+        record.displayName ?? record.name,
         record.kind,
+        record.language ?? "unknown",
         record.fileId,
+        record.filePath,
         record.exported ? 1 : 0,
+        record.ownerSymbolId ?? null,
+        record.ownerKind ?? null,
+        record.signatureText ?? null,
+        record.frameworkRole ?? null,
+        record.span?.startLine ?? null,
+        record.span?.startColumn ?? null,
+        record.span?.endLine ?? null,
+        record.span?.endColumn ?? null,
       );
     this.upsertSearchEntry({
       kind: "symbol",
       id: record.id,
-      text: `${record.name} ${record.kind} ${record.filePath}`,
+      text: `${record.displayName ?? record.name} ${record.kind} ${record.filePath}`,
       path: record.filePath,
     });
+  }
+
+  symbolById(symbolId: string): SymbolDescriptor | null {
+    const row = this.db
+      .prepare("SELECT * FROM symbols WHERE id = ?")
+      .get(symbolId) as SymbolRow | undefined;
+
+    if (!row) {
+      return null;
+    }
+
+    return this.mapSymbolRow(row);
   }
 
   upsertRoute(record: RouteItem): void {
@@ -384,12 +475,25 @@ export class GraphStore {
     targetId: string;
     targetKind: string;
     confidence: number;
+    confidenceLabel?: GraphConfidenceLabel;
+    provenance?: GraphEdgeProvenance;
     metadata?: unknown;
   }): void {
     this.db
       .prepare(`
-        INSERT INTO edges (id, type, source_id, source_kind, target_id, target_kind, confidence, metadata_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO edges (
+          id,
+          type,
+          source_id,
+          source_kind,
+          target_id,
+          target_kind,
+          confidence,
+          confidence_label,
+          provenance_json,
+          metadata_json
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           type = excluded.type,
           source_id = excluded.source_id,
@@ -397,6 +501,8 @@ export class GraphStore {
           target_id = excluded.target_id,
           target_kind = excluded.target_kind,
           confidence = excluded.confidence,
+          confidence_label = excluded.confidence_label,
+          provenance_json = excluded.provenance_json,
           metadata_json = excluded.metadata_json
       `)
       .run(
@@ -407,8 +513,26 @@ export class GraphStore {
         record.targetId,
         record.targetKind,
         record.confidence,
+        record.confidenceLabel ??
+          this.deriveConfidenceLabel(record.confidence),
+        record.provenance ? JSON.stringify(record.provenance) : null,
         record.metadata ? JSON.stringify(record.metadata) : null,
       );
+  }
+
+  upsertSymbolEdge(record: GraphEdgeDescriptor): void {
+    this.insertEdge({
+      id: record.id,
+      type: record.type,
+      sourceId: record.sourceId,
+      sourceKind: record.sourceKind,
+      targetId: record.targetId,
+      targetKind: record.targetKind,
+      confidence: record.confidence,
+      confidenceLabel: record.confidenceLabel,
+      provenance: record.provenance,
+      metadata: record.metadata,
+    });
   }
 
   upsertSearchEntry(record: {
@@ -523,6 +647,47 @@ export class GraphStore {
     return this.mapRouteRow(row);
   }
 
+  symbolNeighbors(symbolId: string): GraphEnvelope {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM edges WHERE source_id = ? OR target_id = ? ORDER BY id",
+      )
+      .all(symbolId, symbolId) as EdgeRow[];
+    const nodes = new Map<string, GraphItem>();
+    const edges = rows.map((row) => this.mapEdgeRow(row));
+
+    const addNode = (nodeId: string, nodeKindHint?: string) => {
+      if (nodes.has(nodeId)) {
+        return;
+      }
+
+      nodes.set(nodeId, this.graphNodeById(nodeId, nodeKindHint));
+    };
+
+    addNode(symbolId, "symbol");
+    for (const edge of edges) {
+      addNode(edge.sourceId, edge.sourceKind);
+      addNode(edge.targetId, edge.targetKind);
+    }
+
+    const confidence = edges.reduce<Partial<Record<GraphConfidenceLabel, number>>>(
+      (counts, edge) => {
+        counts[edge.confidenceLabel] = (counts[edge.confidenceLabel] ?? 0) + 1;
+        return counts;
+      },
+      {},
+    );
+
+    return createGraphEnvelope({
+      nodes: [...nodes.values()],
+      edges,
+      summary: {
+        rootNodeIds: [symbolId],
+        confidence,
+      },
+    });
+  }
+
   private mapRouteRow(row: RouteRow): RouteItem {
     return {
       id: row.id,
@@ -535,6 +700,97 @@ export class GraphStore {
       unitId: row.unit_id,
       confidence: row.confidence,
       provenance: row.metadata_json ? JSON.parse(row.metadata_json) : undefined,
+    };
+  }
+
+  private mapSymbolRow(row: SymbolRow): SymbolDescriptor {
+    return {
+      id: row.id,
+      name: row.name,
+      displayName: row.display_name,
+      kind: row.kind,
+      language: row.language,
+      fileId: row.file_id,
+      filePath: row.file_path,
+      exported: row.exported === 1,
+      ownerSymbolId: row.owner_symbol_id ?? undefined,
+      ownerKind: row.owner_kind ?? undefined,
+      signatureText: row.signature_text ?? undefined,
+      frameworkRole: row.framework_role ?? undefined,
+      span: this.mapSpan(row),
+    };
+  }
+
+  private mapSpan(row: SymbolRow): SourceSpan | undefined {
+    if (
+      row.span_start_line == null ||
+      row.span_start_column == null ||
+      row.span_end_line == null ||
+      row.span_end_column == null
+    ) {
+      return undefined;
+    }
+
+    return {
+      startLine: row.span_start_line,
+      startColumn: row.span_start_column,
+      endLine: row.span_end_line,
+      endColumn: row.span_end_column,
+    };
+  }
+
+  private mapEdgeRow(row: EdgeRow): GraphEdgeDescriptor {
+    return {
+      id: row.id,
+      type: row.type,
+      sourceId: row.source_id,
+      sourceKind: row.source_kind,
+      targetId: row.target_id,
+      targetKind: row.target_kind,
+      confidence: row.confidence,
+      confidenceLabel: row.confidence_label,
+      provenance: row.provenance_json
+        ? JSON.parse(row.provenance_json)
+        : undefined,
+      metadata: row.metadata_json ? JSON.parse(row.metadata_json) : undefined,
+    };
+  }
+
+  private graphNodeById(nodeId: string, nodeKindHint?: string): GraphItem {
+    if (nodeId.startsWith("symbol:")) {
+      const symbol = this.symbolById(nodeId);
+      if (symbol) {
+        return {
+          id: symbol.id,
+          kind: "symbol",
+          label: symbol.displayName,
+          path: symbol.filePath,
+          symbol,
+        };
+      }
+    }
+
+    if (nodeId.startsWith("file:")) {
+      return this.toFileGraphItem(nodeId);
+    }
+
+    if (nodeId.startsWith("route:") || nodeKindHint === "route") {
+      const route = this.routeById(nodeId);
+      if (route) {
+        return {
+          id: route.id,
+          kind: "route",
+          label: `${route.method} ${route.path}`,
+          path: route.filePath,
+          confidence: route.confidence,
+        };
+      }
+    }
+
+    return {
+      id: nodeId,
+      kind: nodeKindHint ?? this.kindFromNodeId(nodeId),
+      label: nodeId.includes("#") ? nodeId.slice(nodeId.lastIndexOf("#") + 1) : nodeId,
     };
   }
 
@@ -837,6 +1093,23 @@ export class GraphStore {
     return createGraphEnvelope();
   }
 
+  private deriveConfidenceLabel(confidence: number): GraphConfidenceLabel {
+    if (confidence >= 1) {
+      return "proven";
+    }
+    if (confidence >= 0.75) {
+      return "inferred-strong";
+    }
+    return "inferred-weak";
+  }
+
+  private kindFromNodeId(nodeId: string): string {
+    if (nodeId.includes(":")) {
+      return nodeId.slice(0, nodeId.indexOf(":"));
+    }
+    return "unknown";
+  }
+
   stats(): IndexSummary {
     const getCount = (table: string, clause = "") =>
       Number(
@@ -969,9 +1242,20 @@ export class GraphStore {
       CREATE TABLE IF NOT EXISTS symbols (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
+        display_name TEXT NOT NULL,
         kind TEXT NOT NULL,
+        language TEXT NOT NULL,
         file_id TEXT NOT NULL,
-        exported INTEGER NOT NULL DEFAULT 0
+        file_path TEXT NOT NULL,
+        exported INTEGER NOT NULL DEFAULT 0,
+        owner_symbol_id TEXT,
+        owner_kind TEXT,
+        signature_text TEXT,
+        framework_role TEXT,
+        span_start_line INTEGER,
+        span_start_column INTEGER,
+        span_end_line INTEGER,
+        span_end_column INTEGER
       );
 
       CREATE TABLE IF NOT EXISTS routes (
@@ -995,6 +1279,8 @@ export class GraphStore {
         target_id TEXT NOT NULL,
         target_kind TEXT NOT NULL,
         confidence REAL NOT NULL,
+        confidence_label TEXT NOT NULL,
+        provenance_json TEXT,
         metadata_json TEXT
       );
 
