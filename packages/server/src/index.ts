@@ -540,6 +540,64 @@ function registerWorkspaceScopedRoutes(
         : engine.flow(target, depth ? Number(depth) : undefined),
     );
   });
+  app.get("/api/workspaces/:workspaceId/symbols/search", async (request) => {
+    const { workspaceId } = request.params as { workspaceId: string };
+    const { q = "" } = request.query as { q?: string };
+    return daemon.withWorkspaceQueryEngine(workspaceId, (engine) =>
+      engine.searchSymbols(String(q)),
+    );
+  });
+  app.get("/api/workspaces/:workspaceId/symbols/get", async (request) => {
+    const { workspaceId } = request.params as { workspaceId: string };
+    return daemon.withWorkspaceQueryEngine(workspaceId, (engine) =>
+      engine.getSymbol(symbolLocatorFromQuery(request.query)),
+    );
+  });
+  app.get(
+    "/api/workspaces/:workspaceId/symbols/neighbors",
+    async (request) => {
+      const { workspaceId } = request.params as { workspaceId: string };
+      return daemon.withWorkspaceQueryEngine(workspaceId, (engine) =>
+        engine.getSymbolNeighbors(symbolLocatorFromQuery(request.query)),
+      );
+    },
+  );
+  app.get(
+    "/api/workspaces/:workspaceId/symbols/execution",
+    async (request) => {
+      const { workspaceId } = request.params as { workspaceId: string };
+      const { maxNodes, maxEdges } = request.query as {
+        maxNodes?: string;
+        maxEdges?: string;
+      };
+      return daemon.withWorkspaceQueryEngine(workspaceId, (engine) =>
+        engine.executionContextFromSymbol(symbolLocatorFromQuery(request.query), {
+          maxNodes: maxNodes ? Number(maxNodes) : undefined,
+          maxEdges: maxEdges ? Number(maxEdges) : undefined,
+        }),
+      );
+    },
+  );
+  app.get("/api/workspaces/:workspaceId/symbols/impact", async (request) => {
+    const { workspaceId } = request.params as { workspaceId: string };
+    const { maxNodes, maxEdges } = request.query as {
+      maxNodes?: string;
+      maxEdges?: string;
+    };
+    return daemon.withWorkspaceQueryEngine(workspaceId, (engine) =>
+      engine.impactFromSymbol(symbolLocatorFromQuery(request.query), {
+        maxNodes: maxNodes ? Number(maxNodes) : undefined,
+        maxEdges: maxEdges ? Number(maxEdges) : undefined,
+      }),
+    );
+  });
+  app.get("/api/workspaces/:workspaceId/symbols/edge", async (request) => {
+    const { workspaceId } = request.params as { workspaceId: string };
+    const { edgeId = "" } = request.query as { edgeId?: string };
+    return daemon.withWorkspaceQueryEngine(workspaceId, (engine) =>
+      engine.explainEdge(edgeId),
+    );
+  });
 }
 
 export * from "./daemon";

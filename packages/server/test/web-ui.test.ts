@@ -1,7 +1,8 @@
 import { describe, expect, test } from "vitest";
 
-import type { DiscoveredUnit } from "@graphtrace/shared";
 import {
+  type DiscoveredUnit,
+  createGraphEnvelope,
   deriveRepositories,
   resolveRepositoryForPath,
 } from "@graphtrace/shared";
@@ -15,6 +16,7 @@ import {
   buildRouteHref,
   parseRouteState,
 } from "../../../apps/web/src/route-state";
+import { buildSymbolInspectorSections } from "../../../apps/web/src/symbol-graph-view-model";
 import type {
   GraphItem,
   PackageSummary,
@@ -251,6 +253,106 @@ const workspaces: WorkspaceHomeSummary[] = [
     },
   },
 ];
+
+const symbolGraph = createGraphEnvelope({
+  nodes: [
+    {
+      id: "symbol:apps/api/src/services/user-service.ts#listUsers",
+      kind: "symbol",
+      label: "listUsers",
+      path: "apps/api/src/services/user-service.ts",
+    },
+    {
+      id: "symbol:apps/api/src/routes/users.ts#auditedListUsers",
+      kind: "symbol",
+      label: "auditedListUsers",
+      path: "apps/api/src/routes/users.ts",
+    },
+    {
+      id: "symbol:apps/api/src/services/user-service.ts#withAudit",
+      kind: "symbol",
+      label: "withAudit",
+      path: "apps/api/src/services/user-service.ts",
+    },
+    {
+      id: "symbol:apps/api/src/services/user-service.ts#prisma",
+      kind: "symbol",
+      label: "prisma",
+      path: "apps/api/src/services/user-service.ts",
+    },
+    {
+      id: "GET /users",
+      kind: "route",
+      label: "GET /users",
+      path: "apps/api/src/routes/users.ts",
+    },
+    {
+      id: "query:apps/api/src/services/user-service.ts#prisma.user.findMany(",
+      kind: "query",
+      label: "prisma.user.findMany(",
+    },
+  ],
+  edges: [
+    {
+      id: "edge:calls:auditedListUsers->listUsers",
+      type: "calls",
+      sourceId: "symbol:apps/api/src/routes/users.ts#auditedListUsers",
+      sourceKind: "symbol",
+      targetId: "symbol:apps/api/src/services/user-service.ts#listUsers",
+      targetKind: "symbol",
+      confidence: 0.85,
+      confidenceLabel: "inferred-strong",
+    },
+    {
+      id: "edge:references:withAudit->listUsers",
+      type: "references",
+      sourceId: "symbol:apps/api/src/services/user-service.ts#withAudit",
+      sourceKind: "symbol",
+      targetId: "symbol:apps/api/src/services/user-service.ts#listUsers",
+      targetKind: "symbol",
+      confidence: 1,
+      confidenceLabel: "proven",
+    },
+    {
+      id: "edge:references:listUsers->prisma",
+      type: "references",
+      sourceId: "symbol:apps/api/src/services/user-service.ts#listUsers",
+      sourceKind: "symbol",
+      targetId: "symbol:apps/api/src/services/user-service.ts#prisma",
+      targetKind: "symbol",
+      confidence: 1,
+      confidenceLabel: "proven",
+    },
+    {
+      id: "edge:routes_to:GET /users->listUsers",
+      type: "routes_to",
+      sourceId: "GET /users",
+      sourceKind: "route",
+      targetId: "symbol:apps/api/src/services/user-service.ts#listUsers",
+      targetKind: "symbol",
+      confidence: 1,
+      confidenceLabel: "proven",
+    },
+    {
+      id: "edge:queries:listUsers->findMany",
+      type: "queries",
+      sourceId: "symbol:apps/api/src/services/user-service.ts#listUsers",
+      sourceKind: "symbol",
+      targetId:
+        "query:apps/api/src/services/user-service.ts#prisma.user.findMany(",
+      targetKind: "query",
+      confidence: 1,
+      confidenceLabel: "proven",
+    },
+  ],
+  summary: {
+    rootNodeIds: ["symbol:apps/api/src/services/user-service.ts#listUsers"],
+    confidence: {
+      proven: 4,
+      "inferred-strong": 1,
+    },
+  },
+});
 
 describe("web ui view-model", () => {
   test("derives explicit repositories from workspace units and resolves paths against them", () => {
@@ -527,6 +629,60 @@ describe("web ui view-model", () => {
     const messages = getMessages("vi");
 
     expect(messages.app[key]).toContain(expected);
+  });
+
+  test("exposes symbol graph labels for execution, impact, reference, and inspector sections", () => {
+    const messages = getMessages("en");
+
+    expect(messages.app.symbolGraphExecution).toBe("Execution");
+    expect(messages.app.symbolGraphImpact).toBe("Impact");
+    expect(messages.app.symbolGraphReference).toBe("Reference");
+    expect(messages.app.symbolGraphCallers).toBe("Callers");
+    expect(messages.app.symbolGraphCallees).toBe("Callees");
+    expect(messages.app.symbolGraphRoutes).toBe("Routes");
+    expect(messages.app.symbolGraphSinks).toBe("Sinks");
+  });
+
+  test("builds symbol inspector sections for reference mode from proven reference edges only", () => {
+    const sections = buildSymbolInspectorSections({
+      graph: symbolGraph,
+      rootSymbolId: "symbol:apps/api/src/services/user-service.ts#listUsers",
+      mode: "reference",
+      confidenceFilter: "proven",
+      labels: {
+        callers: "Callers",
+        callees: "Callees",
+        routes: "Routes",
+        sinks: "Sinks",
+      },
+    });
+
+    expect(sections).toEqual([
+      expect.objectContaining({
+        id: "callers",
+        items: [
+          expect.objectContaining({
+            id: "symbol:apps/api/src/services/user-service.ts#withAudit",
+          }),
+        ],
+      }),
+      expect.objectContaining({
+        id: "callees",
+        items: [
+          expect.objectContaining({
+            id: "symbol:apps/api/src/services/user-service.ts#prisma",
+          }),
+        ],
+      }),
+      expect.objectContaining({
+        id: "routes",
+        items: [],
+      }),
+      expect.objectContaining({
+        id: "sinks",
+        items: [],
+      }),
+    ]);
   });
 
   test("derives route insights for related packages and query hints", () => {

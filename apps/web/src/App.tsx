@@ -18,6 +18,9 @@ import {
   getWorkspaceRepositories,
   getWorkspaceRoutes,
   getWorkspaceStatus,
+  getWorkspaceSymbolExecution,
+  getWorkspaceSymbolImpact,
+  getWorkspaceSymbolNeighbors,
   getWorkspaces,
   searchWorkspace,
 } from "./api-client";
@@ -42,6 +45,16 @@ import {
 } from "./i18n";
 import { buildRouteHref, parseRouteState } from "./route-state";
 import { StarterGuide } from "./starter-guide";
+import { SymbolGraphControls } from "./symbol-graph-controls";
+import { SymbolGraphInspector } from "./symbol-graph-inspector";
+import type {
+  SymbolGraphConfidenceFilter,
+  SymbolGraphMode,
+} from "./symbol-graph-types";
+import {
+  buildSymbolGraphModel,
+  buildSymbolInspectorSections,
+} from "./symbol-graph-view-model";
 import {
   type GraphItem,
   type PackageListEntry,
@@ -109,6 +122,12 @@ export function App() {
   const [routeFlow, setRouteFlow] = useState<GraphItem[]>([]);
   const [dependencyItems, setDependencyItems] = useState<GraphItem[]>([]);
   const [impactItems, setImpactItems] = useState<GraphItem[]>([]);
+  const [symbolGraphMode, setSymbolGraphMode] =
+    useState<SymbolGraphMode>("execution");
+  const [symbolConfidenceFilter, setSymbolConfidenceFilter] =
+    useState<SymbolGraphConfidenceFilter>("strong");
+  const [symbolGraphResult, setSymbolGraphResult] =
+    useState<QueryResult<GraphItem> | null>(null);
   const [workspaceError, setWorkspaceError] = useState("");
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [draftRootPath, setDraftRootPath] = useState("");
@@ -190,7 +209,19 @@ export function App() {
     selectedPackageId,
     edgeFilters,
   });
-  const positionedGraphNodes = layoutArchitectureGraph(architectureGraph);
+  const isSymbolInspector =
+    inspector.type === "search" && inspector.item.kind === "symbol";
+  const symbolGraph =
+    isSymbolInspector && inspector.type === "search"
+      ? buildSymbolGraphModel({
+          graph: symbolGraphResult?.graph,
+          mode: symbolGraphMode,
+          rootSymbolId: inspector.item.id,
+          confidenceFilter: symbolConfidenceFilter,
+        })
+      : null;
+  const activeGraph = symbolGraph ?? architectureGraph;
+  const positionedGraphNodes = layoutArchitectureGraph(activeGraph);
   const selectedPath =
     inspector.type === "route"
       ? inspector.route.filePath
@@ -225,6 +256,21 @@ export function App() {
     status?.workspaceRoot && selectedPath
       ? `file://${encodeURI(joinPath(status.workspaceRoot, selectedPath))}`
       : "";
+  const symbolInspectorSections =
+    isSymbolInspector && inspector.type === "search"
+      ? buildSymbolInspectorSections({
+          graph: symbolGraphResult?.graph,
+          rootSymbolId: inspector.item.id,
+          mode: symbolGraphMode,
+          confidenceFilter: symbolConfidenceFilter,
+          labels: {
+            callers: messages.app.symbolGraphCallers,
+            callees: messages.app.symbolGraphCallees,
+            routes: messages.app.symbolGraphRoutes,
+            sinks: messages.app.symbolGraphSinks,
+          },
+        })
+      : [];
 
   useEffect(() => {
     let cancelled = false;
@@ -409,6 +455,36 @@ export function App() {
             setDependencyItems([]);
             setImpactItems([]);
           });
+        } else if (inspector.item.kind === "symbol") {
+          const payload =
+            symbolGraphMode === "impact"
+              ? await getWorkspaceSymbolImpact(
+                  selectedWorkspaceId,
+                  inspector.item.id,
+                  refreshNonce,
+                )
+              : symbolGraphMode === "reference"
+                ? await getWorkspaceSymbolNeighbors(
+                    selectedWorkspaceId,
+                    inspector.item.id,
+                    refreshNonce,
+                  )
+                : await getWorkspaceSymbolExecution(
+                    selectedWorkspaceId,
+                    inspector.item.id,
+                    refreshNonce,
+                  );
+
+          if (cancelled) {
+            return;
+          }
+
+          startTransition(() => {
+            setSymbolGraphResult(payload);
+            setRouteFlow([]);
+            setDependencyItems([]);
+            setImpactItems([]);
+          });
         } else if (
           inspector.item.path &&
           looksLikeSourcePath(inspector.item.path)
@@ -439,6 +515,7 @@ export function App() {
           });
         } else {
           startTransition(() => {
+            setSymbolGraphResult(null);
             setRouteFlow([]);
             setDependencyItems([]);
             setImpactItems([]);
@@ -455,6 +532,7 @@ export function App() {
               ? error.message
               : messages.app.loadInspectorError,
           );
+          setSymbolGraphResult(null);
           setRouteFlow([]);
           setDependencyItems([]);
           setImpactItems([]);
@@ -479,6 +557,7 @@ export function App() {
     refreshNonce,
     selectedRepositoryId,
     selectedWorkspaceId,
+    symbolGraphMode,
   ]);
 
   useEffect(() => {
@@ -563,6 +642,9 @@ export function App() {
         setSearchText("");
         setSearchResults([]);
         setInspector({ type: "idle" });
+        setSymbolGraphMode("execution");
+        setSymbolConfidenceFilter("strong");
+        setSymbolGraphResult(null);
         setRefreshNonce((value) => value + 1);
         setWorkspaceError("");
       });
@@ -600,6 +682,9 @@ export function App() {
             setSearchText("");
             setSearchResults([]);
             setInspector({ type: "idle" });
+            setSymbolGraphMode("execution");
+            setSymbolConfidenceFilter("strong");
+            setSymbolGraphResult(null);
           });
         }}
       />
@@ -677,9 +762,12 @@ export function App() {
                     setSelectedRepositoryId(nextRepositoryId);
                     setSelectedPackageId("");
                     setInspector({ type: "idle" });
+                    setSymbolGraphMode("execution");
+                    setSymbolConfidenceFilter("strong");
                     setRouteFlow([]);
                     setDependencyItems([]);
                     setImpactItems([]);
+                    setSymbolGraphResult(null);
                     setSearchResults([]);
                   });
                 }}
@@ -878,41 +966,60 @@ export function App() {
                 <p>{messages.app.architectureGraphDescription}</p>
               </div>
 
-              <div className="graph-toolbar">
-                {(
-                  [
-                    ["flow", messages.app.graphEdgeFlow],
-                    ["depends", messages.app.graphEdgeDepends],
-                    ["impacts", messages.app.graphEdgeImpacts],
-                    ["contains", messages.app.graphEdgeContains],
-                  ] as const
-                ).map(([key, label]) => (
-                  <button
-                    key={key}
-                    className={
-                      edgeFilters[key]
-                        ? "graph-filter is-active"
-                        : "graph-filter"
-                    }
-                    type="button"
-                    onClick={() =>
-                      setEdgeFilters((current) => ({
-                        ...current,
-                        [key]: !current[key],
-                      }))
-                    }
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+              {isSymbolInspector ? null : (
+                <div className="graph-toolbar">
+                  {(
+                    [
+                      ["flow", messages.app.graphEdgeFlow],
+                      ["depends", messages.app.graphEdgeDepends],
+                      ["impacts", messages.app.graphEdgeImpacts],
+                      ["contains", messages.app.graphEdgeContains],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <button
+                      key={key}
+                      className={
+                        edgeFilters[key]
+                          ? "graph-filter is-active"
+                          : "graph-filter"
+                      }
+                      type="button"
+                      onClick={() =>
+                        setEdgeFilters((current) => ({
+                          ...current,
+                          [key]: !current[key],
+                        }))
+                      }
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               <GraphWorkspace
                 locale={locale}
-                graph={architectureGraph}
+                graph={activeGraph}
                 nodes={positionedGraphNodes}
                 starterGuide={starterGuide}
-                onSelectNode={(node) =>
+                toolbarExtras={
+                  isSymbolInspector && inspector.type === "search" ? (
+                    <SymbolGraphControls
+                      locale={locale}
+                      mode={symbolGraphMode}
+                      confidenceFilter={symbolConfidenceFilter}
+                      confidenceSummary={symbolGraphResult?.graph?.summary}
+                      symbolLabel={inspector.item.label}
+                      onModeChange={setSymbolGraphMode}
+                      onConfidenceFilterChange={setSymbolConfidenceFilter}
+                    />
+                  ) : undefined
+                }
+                onSelectNode={(node) => {
+                  if (node.kind === "symbol") {
+                    setSymbolGraphMode("execution");
+                    setSymbolConfidenceFilter("strong");
+                  }
                   inspectGraphItem(
                     {
                       id: node.id,
@@ -926,8 +1033,8 @@ export function App() {
                     setSelectedPackageId,
                     setSearchKind,
                     setSearchText,
-                  )
-                }
+                  );
+                }}
                 onRunStarterAction={(action) =>
                   runStarterAction(
                     action,
@@ -1042,9 +1149,13 @@ export function App() {
                               : "list-item"
                           }
                           type="button"
-                          onClick={() =>
-                            inspectSearchResult(item, routes, setInspector)
-                          }
+                          onClick={() => {
+                            if (item.kind === "symbol") {
+                              setSymbolGraphMode("execution");
+                              setSymbolConfidenceFilter("strong");
+                            }
+                            inspectSearchResult(item, routes, setInspector);
+                          }}
                         >
                           <span className="list-chip">{item.kind}</span>
                           <span className="list-title">{item.label}</span>
@@ -1248,7 +1359,27 @@ export function App() {
                   <div className="error-banner">{detailError}</div>
                 ) : null}
 
-                {inspector.type === "route" ? (
+                {isSymbolInspector ? (
+                  <SymbolGraphInspector
+                    locale={locale}
+                    sections={symbolInspectorSections}
+                    onSelectItem={(item) => {
+                      if (item.kind === "symbol") {
+                        setSymbolGraphMode("execution");
+                        setSymbolConfidenceFilter("strong");
+                      }
+                      inspectGraphItem(
+                        item,
+                        packages,
+                        routes,
+                        setInspector,
+                        setSelectedPackageId,
+                        setSearchKind,
+                        setSearchText,
+                      );
+                    }}
+                  />
+                ) : inspector.type === "route" ? (
                   <>
                     <InspectorSection
                       locale={locale}
