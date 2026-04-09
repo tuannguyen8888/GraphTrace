@@ -1,4 +1,8 @@
-import type { DiscoveredUnit, RepositorySummary } from "@graphtrace/shared";
+import type {
+  DiscoveredUnit,
+  GraphEnvelope,
+  RepositorySummary,
+} from "@graphtrace/shared";
 import { pathBelongsToRepository } from "@graphtrace/shared";
 
 import { DEFAULT_LOCALE, type Locale, getMessages } from "./i18n";
@@ -57,6 +61,7 @@ export interface GraphItem {
 
 export interface QueryResult<T> {
   items: T[];
+  graph?: GraphEnvelope;
 }
 
 export type ScopeMode = "primary" | "all" | "tests";

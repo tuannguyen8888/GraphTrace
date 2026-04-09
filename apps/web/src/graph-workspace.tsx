@@ -13,7 +13,7 @@ import {
   useEdgesState,
   useNodesState,
 } from "@xyflow/react";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import type {
   ArchitectureGraphEdge,
@@ -38,6 +38,7 @@ interface GraphWorkspaceProps {
   onSelectNode: (node: ArchitectureGraphNode) => void;
   starterGuide: WorkspaceStarterGuide;
   onRunStarterAction: (action: WorkspaceStarterAction) => void;
+  toolbarExtras?: ReactNode;
 }
 
 interface GraphFlowNodeData extends Record<string, unknown> {
@@ -157,6 +158,7 @@ function GraphWorkspaceInner(props: GraphWorkspaceProps) {
         </label>
 
         <div className="graph-toolbar-actions">
+          {props.toolbarExtras}
           <button
             className="graph-filter"
             type="button"
@@ -355,6 +357,8 @@ function buildFlowNodeStyle(
       ? "rgba(99, 187, 255, 0.44)"
       : kind === "package"
         ? "rgba(130, 217, 160, 0.4)"
+        : kind === "symbol"
+          ? "rgba(150, 126, 255, 0.34)"
         : kind === "query"
           ? "rgba(255, 129, 102, 0.36)"
           : "rgba(246, 180, 73, 0.32)";
@@ -401,6 +405,10 @@ function graphNodeDimensions(isFocus: boolean, kind: string) {
 
   if (kind === "package") {
     return { width: 248, height: 96 };
+  }
+
+  if (kind === "symbol") {
+    return { width: 260, height: 96 };
   }
 
   if (kind === "query") {

@@ -159,6 +159,36 @@ export function getFileImpact(
   );
 }
 
+export function getWorkspaceSymbolExecution(
+  workspaceId: string,
+  symbolId: string,
+  refreshNonce = 0,
+) {
+  return fetchJson<QueryResult<GraphItem>>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/symbols/execution?symbolId=${encodeURIComponent(symbolId)}&maxNodes=18&maxEdges=24&refresh=${refreshNonce}`,
+  );
+}
+
+export function getWorkspaceSymbolImpact(
+  workspaceId: string,
+  symbolId: string,
+  refreshNonce = 0,
+) {
+  return fetchJson<QueryResult<GraphItem>>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/symbols/impact?symbolId=${encodeURIComponent(symbolId)}&maxNodes=18&maxEdges=24&refresh=${refreshNonce}`,
+  );
+}
+
+export function getWorkspaceSymbolNeighbors(
+  workspaceId: string,
+  symbolId: string,
+  refreshNonce = 0,
+) {
+  return fetchJson<QueryResult<GraphItem>>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/symbols/neighbors?symbolId=${encodeURIComponent(symbolId)}&refresh=${refreshNonce}`,
+  );
+}
+
 function buildWorkspaceApiPath(
   workspaceId: string,
   endpoint: string,
