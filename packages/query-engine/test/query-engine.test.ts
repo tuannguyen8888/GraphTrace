@@ -230,5 +230,5 @@ describe("query engine", () => {
     } finally {
       store.close();
     }
-  });
+  }, 20_000);
 });

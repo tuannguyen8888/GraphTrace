@@ -148,10 +148,7 @@ function resolveSymbolId(
     if (!isWorkspaceSourcePath(declarationFilePath)) {
       continue;
     }
-    const symbolId = symbolIdFromDeclaration(
-      declaration,
-      declarationFilePath,
-    );
+    const symbolId = symbolIdFromDeclaration(declaration, declarationFilePath);
     if (symbolId) {
       return symbolId;
     }
@@ -169,7 +166,10 @@ function findEnclosingSymbol(
     containsPosition(symbol, line, column),
   );
 
-  return candidates.sort((left, right) => spanSize(left) - spanSize(right))[0] ?? null;
+  return (
+    candidates.sort((left, right) => spanSize(left) - spanSize(right))[0] ??
+    null
+  );
 }
 
 function containsPosition(

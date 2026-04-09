@@ -23,8 +23,8 @@ import {
 } from "@graphtrace/shared";
 import { openGraphStore } from "@graphtrace/storage";
 import { extractExecutionFlow } from "./extract-execution-flow";
-import { extractSymbols } from "./extract-symbols";
 import { extractReferences } from "./extract-references";
+import { extractSymbols } from "./extract-symbols";
 import {
   buildInlineRouteHandlerId,
   findWrappedCallbackExpression,
@@ -724,14 +724,9 @@ function resolveHttpRouteHandler(
     return null;
   }
 
-  const handlerExpression = routeCall.arguments
-    .slice(1)
-    .findLast((argument) =>
-      ts.isIdentifier(argument) ||
-      ts.isArrowFunction(argument) ||
-      ts.isFunctionExpression(argument) ||
-      ts.isCallExpression(argument),
-    );
+  const handlerExpression = findLastRouteHandlerExpression(
+    routeCall.arguments.slice(1),
+  );
 
   if (!handlerExpression) {
     return null;
@@ -773,6 +768,24 @@ function resolveHttpRouteHandler(
   }
 
   return null;
+}
+
+function findLastRouteHandlerExpression(
+  argumentsList: ts.Expression[],
+): ts.Expression | undefined {
+  for (let index = argumentsList.length - 1; index >= 0; index -= 1) {
+    const argument = argumentsList[index];
+    if (
+      ts.isIdentifier(argument) ||
+      ts.isArrowFunction(argument) ||
+      ts.isFunctionExpression(argument) ||
+      ts.isCallExpression(argument)
+    ) {
+      return argument;
+    }
+  }
+
+  return undefined;
 }
 
 function extractQueryHints(

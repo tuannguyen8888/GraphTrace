@@ -73,7 +73,8 @@ describe("symbol query engine", () => {
 
       expect(
         queryEngine.getSymbol({
-          symbolId: "symbol:apps/api/src/services/user-service.ts#createReporter",
+          symbolId:
+            "symbol:apps/api/src/services/user-service.ts#createReporter",
         }).items[0],
       ).toMatchObject({
         id: "symbol:apps/api/src/services/user-service.ts#createReporter",
@@ -120,7 +121,8 @@ describe("symbol query engine", () => {
         edges: expect.arrayContaining([
           expect.objectContaining({
             type: "calls",
-            targetId: "symbol:apps/api/src/services/user-service.ts#createReporter",
+            targetId:
+              "symbol:apps/api/src/services/user-service.ts#createReporter",
           }),
         ]),
         summary: expect.objectContaining({

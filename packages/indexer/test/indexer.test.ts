@@ -83,11 +83,14 @@ describe("indexWorkspace", () => {
       full: true,
     });
 
-    const store = openGraphStore(join(nestFixtureRoot, ".graphtrace", "index.db"));
+    const store = openGraphStore(
+      join(nestFixtureRoot, ".graphtrace", "index.db"),
+    );
 
     try {
       expect(store.routeById("GET /users")).toMatchObject({
-        handlerSymbolId: "symbol:apps/api/src/users.controller.ts#UsersController.listUsers",
+        handlerSymbolId:
+          "symbol:apps/api/src/users.controller.ts#UsersController.listUsers",
       });
     } finally {
       store.close();
@@ -209,7 +212,8 @@ describe("indexWorkspace", () => {
         ),
       ).toMatchObject({
         kind: "method",
-        ownerSymbolId: "symbol:apps/api/src/services/user-service.ts#UsersController",
+        ownerSymbolId:
+          "symbol:apps/api/src/services/user-service.ts#UsersController",
         ownerKind: "class",
       });
       expect(
@@ -269,13 +273,15 @@ describe("indexWorkspace", () => {
           expect.objectContaining({
             type: "calls",
             sourceId: "symbol:apps/api/src/routes/users.ts#router.post.reports",
-            targetId: "symbol:apps/api/src/services/user-service.ts#createReporter",
+            targetId:
+              "symbol:apps/api/src/services/user-service.ts#createReporter",
             confidenceLabel: "proven",
           }),
           expect.objectContaining({
             type: "references",
             sourceId: "symbol:apps/api/src/routes/users.ts#router.post.reports",
-            targetId: "symbol:apps/api/src/services/user-service.ts#metrics.trackRoute",
+            targetId:
+              "symbol:apps/api/src/services/user-service.ts#metrics.trackRoute",
             confidenceLabel: "proven",
           }),
         ]),
@@ -299,7 +305,9 @@ describe("indexWorkspace", () => {
 
     try {
       expect(
-        store.symbolNeighbors("symbol:apps/api/src/routes/users.ts#auditedListUsers"),
+        store.symbolNeighbors(
+          "symbol:apps/api/src/routes/users.ts#auditedListUsers",
+        ),
       ).toMatchObject({
         edges: expect.arrayContaining([
           expect.objectContaining({
@@ -323,7 +331,8 @@ describe("indexWorkspace", () => {
           expect.objectContaining({
             type: "queries",
             sourceId: "symbol:apps/api/src/services/user-service.ts#listUsers",
-            targetId: "query:apps/api/src/services/user-service.ts#prisma.user.findMany(",
+            targetId:
+              "query:apps/api/src/services/user-service.ts#prisma.user.findMany(",
           }),
         ]),
       });
@@ -346,7 +355,9 @@ describe("indexWorkspace", () => {
 
     try {
       expect(
-        store.symbolById("symbol:apps/web/src/dashboard.tsx#Dashboard.loadProfile"),
+        store.symbolById(
+          "symbol:apps/web/src/dashboard.tsx#Dashboard.loadProfile",
+        ),
       ).toMatchObject({
         kind: "function",
         ownerSymbolId: "symbol:apps/web/src/dashboard.tsx#Dashboard",
@@ -361,13 +372,14 @@ describe("indexWorkspace", () => {
         ownerSymbolId: "symbol:apps/web/src/dashboard.tsx#services.profile",
         ownerKind: "object",
       });
-      expect(
-        store.routeById("GET /reports"),
-      ).toMatchObject({
-        handlerSymbolId: "symbol:apps/api/src/routes/reports.ts#router.get.reports",
+      expect(store.routeById("GET /reports")).toMatchObject({
+        handlerSymbolId:
+          "symbol:apps/api/src/routes/reports.ts#router.get.reports",
       });
       expect(
-        store.symbolNeighbors("symbol:apps/web/src/dashboard.tsx#Dashboard.loadProfile"),
+        store.symbolNeighbors(
+          "symbol:apps/web/src/dashboard.tsx#Dashboard.loadProfile",
+        ),
       ).toMatchObject({
         edges: expect.arrayContaining([
           expect.objectContaining({
@@ -380,17 +392,21 @@ describe("indexWorkspace", () => {
         ]),
       });
       expect(
-        store.symbolNeighbors("symbol:apps/api/src/routes/reports.ts#router.get.reports"),
+        store.symbolNeighbors(
+          "symbol:apps/api/src/routes/reports.ts#router.get.reports",
+        ),
       ).toMatchObject({
         edges: expect.arrayContaining([
           expect.objectContaining({
             type: "routes_to",
             sourceId: "GET /reports",
-            targetId: "symbol:apps/api/src/routes/reports.ts#router.get.reports",
+            targetId:
+              "symbol:apps/api/src/routes/reports.ts#router.get.reports",
           }),
           expect.objectContaining({
             type: "calls",
-            sourceId: "symbol:apps/api/src/routes/reports.ts#router.get.reports",
+            sourceId:
+              "symbol:apps/api/src/routes/reports.ts#router.get.reports",
             targetId:
               "symbol:apps/api/src/services/report-service.ts#reportService.listReports",
             confidenceLabel: "proven",

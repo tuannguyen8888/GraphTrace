@@ -4,11 +4,11 @@ import { DatabaseSync } from "node:sqlite";
 
 import type {
   DependencyDirection,
-  GraphEnvelope,
-  GraphEdgeDescriptor,
-  GraphEdgeProvenance,
   DiscoveredUnit,
   GraphConfidenceLabel,
+  GraphEdgeDescriptor,
+  GraphEdgeProvenance,
+  GraphEnvelope,
   GraphItem,
   IndexRunInfo,
   IndexSummary,
@@ -29,7 +29,7 @@ const SCHEMA_VERSION = 5;
 
 interface EdgeRow {
   id: string;
-  type: string;
+  type: GraphEdgeDescriptor["type"];
   source_id: string;
   source_kind: string;
   target_id: string;
@@ -474,7 +474,7 @@ export class GraphStore {
         line,
         line,
         column,
-      ) as SymbolRow[];
+      ) as unknown as SymbolRow[];
 
     const match = rows
       .map((row) => this.mapSymbolRow(row))
@@ -579,8 +579,7 @@ export class GraphStore {
         record.targetId,
         record.targetKind,
         record.confidence,
-        record.confidenceLabel ??
-          this.deriveConfidenceLabel(record.confidence),
+        record.confidenceLabel ?? this.deriveConfidenceLabel(record.confidence),
         record.provenance ? JSON.stringify(record.provenance) : null,
         record.metadata ? JSON.stringify(record.metadata) : null,
       );
@@ -718,7 +717,7 @@ export class GraphStore {
       .prepare(
         "SELECT * FROM edges WHERE source_id = ? OR target_id = ? ORDER BY id",
       )
-      .all(symbolId, symbolId) as EdgeRow[];
+      .all(symbolId, symbolId) as unknown as EdgeRow[];
     const nodes = new Map<string, GraphItem>();
     const edges = rows.map((row) => this.mapEdgeRow(row));
 
@@ -736,18 +735,19 @@ export class GraphStore {
       addNode(edge.targetId, edge.targetKind);
     }
 
-    const confidence = edges.reduce<Partial<Record<GraphConfidenceLabel, number>>>(
-      (counts, edge) => {
-        counts[edge.confidenceLabel] = (counts[edge.confidenceLabel] ?? 0) + 1;
-        return counts;
-      },
-      {},
-    );
+    const confidence = edges.reduce<
+      Partial<Record<GraphConfidenceLabel, number>>
+    >((counts, edge) => {
+      counts[edge.confidenceLabel] = (counts[edge.confidenceLabel] ?? 0) + 1;
+      return counts;
+    }, {});
 
     return createGraphEnvelope({
       nodes: [...nodes.values()],
       edges,
       summary: {
+        nodeCount: nodes.size,
+        edgeCount: edges.length,
         rootNodeIds: [symbolId],
         confidence,
       },
@@ -858,13 +858,19 @@ export class GraphStore {
       .prepare(
         "SELECT * FROM edges WHERE type IN ('routes_to', 'calls', 'queries')",
       )
-      .all() as EdgeRow[];
+      .all() as unknown as EdgeRow[];
     const outgoing = new Map<string, EdgeRow[]>();
     const incoming = new Map<string, EdgeRow[]>();
 
     for (const row of rows) {
-      outgoing.set(row.source_id, [...(outgoing.get(row.source_id) ?? []), row]);
-      incoming.set(row.target_id, [...(incoming.get(row.target_id) ?? []), row]);
+      outgoing.set(row.source_id, [
+        ...(outgoing.get(row.source_id) ?? []),
+        row,
+      ]);
+      incoming.set(row.target_id, [
+        ...(incoming.get(row.target_id) ?? []),
+        row,
+      ]);
     }
 
     const nodes = new Map<string, GraphItem>([
@@ -902,7 +908,10 @@ export class GraphStore {
               continue;
             }
 
-            nodes.set(nextNode.id, this.graphNodeById(nextNode.id, nextNode.kind));
+            nodes.set(
+              nextNode.id,
+              this.graphNodeById(nextNode.id, nextNode.kind),
+            );
           }
 
           if (!edges.has(row.id)) {
@@ -939,6 +948,8 @@ export class GraphStore {
       nodes: [...nodes.values()],
       edges: [...edges.values()],
       summary: {
+        nodeCount: nodes.size,
+        edgeCount: edges.size,
         rootNodeIds: [rootId],
         confidence,
         truncated:
@@ -983,7 +994,9 @@ export class GraphStore {
     return {
       id: nodeId,
       kind: nodeKindHint ?? this.kindFromNodeId(nodeId),
-      label: nodeId.includes("#") ? nodeId.slice(nodeId.lastIndexOf("#") + 1) : nodeId,
+      label: nodeId.includes("#")
+        ? nodeId.slice(nodeId.lastIndexOf("#") + 1)
+        : nodeId,
     };
   }
 
@@ -1152,7 +1165,6 @@ export class GraphStore {
     route: RouteItem,
     maxDepth: number,
   ): QueryResult<GraphItem> {
-
     const startIds = new Set<string>([`file:${route.filePath}`]);
     if (route.handlerSymbolId) {
       const statement = this.db

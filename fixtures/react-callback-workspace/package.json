@@ -1,7 +1,5 @@
 {
   "name": "react-callback-workspace",
   "private": true,
-  "workspaces": [
-    "apps/*"
-  ]
+  "workspaces": ["apps/*"]
 }

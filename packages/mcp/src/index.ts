@@ -7,6 +7,7 @@ import {
   runWorkspaceIndex,
   withWorkspaceQueryEngine,
 } from "@graphtrace/query-engine";
+import type { SymbolLocator } from "@graphtrace/shared";
 
 function asToolResult(payload: unknown) {
   return {
@@ -35,7 +36,8 @@ export async function createGraphTraceMcpServer(options: {
   server.registerTool(
     "graphtrace_search_symbols",
     {
-      description: "Search symbol definitions by name and return a zero-hop graph envelope.",
+      description:
+        "Search symbol definitions by name and return a zero-hop graph envelope.",
       inputSchema: {
         query: z.string(),
       },
@@ -47,7 +49,8 @@ export async function createGraphTraceMcpServer(options: {
   server.registerTool(
     "graphtrace_get_symbol",
     {
-      description: "Resolve a symbol by id, file plus name, or file plus position.",
+      description:
+        "Resolve a symbol by id, file plus name, or file plus position.",
       inputSchema: {
         symbolId: z.string().optional(),
         filePath: z.string().optional(),
@@ -57,13 +60,16 @@ export async function createGraphTraceMcpServer(options: {
       },
     },
     async (locator) =>
-      asToolResult(withQueryEngine((engine) => engine.getSymbol(locator))),
+      asToolResult(
+        withQueryEngine((engine) => engine.getSymbol(toSymbolLocator(locator))),
+      ),
   );
 
   server.registerTool(
     "graphtrace_get_execution_context",
     {
-      description: "Get upstream callers, downstream callees, and sinks for a symbol.",
+      description:
+        "Get upstream callers, downstream callees, and sinks for a symbol.",
       inputSchema: {
         symbolId: z.string().optional(),
         filePath: z.string().optional(),
@@ -77,7 +83,10 @@ export async function createGraphTraceMcpServer(options: {
     async ({ maxNodes, maxEdges, ...locator }) =>
       asToolResult(
         withQueryEngine((engine) =>
-          engine.executionContextFromSymbol(locator, { maxNodes, maxEdges }),
+          engine.executionContextFromSymbol(toSymbolLocator(locator), {
+            maxNodes,
+            maxEdges,
+          }),
         ),
       ),
   );
@@ -85,7 +94,8 @@ export async function createGraphTraceMcpServer(options: {
   server.registerTool(
     "graphtrace_get_symbol_impact",
     {
-      description: "Get an impact-oriented symbol graph with truncation metadata.",
+      description:
+        "Get an impact-oriented symbol graph with truncation metadata.",
       inputSchema: {
         symbolId: z.string().optional(),
         filePath: z.string().optional(),
@@ -99,7 +109,10 @@ export async function createGraphTraceMcpServer(options: {
     async ({ maxNodes, maxEdges, ...locator }) =>
       asToolResult(
         withQueryEngine((engine) =>
-          engine.impactFromSymbol(locator, { maxNodes, maxEdges }),
+          engine.impactFromSymbol(toSymbolLocator(locator), {
+            maxNodes,
+            maxEdges,
+          }),
         ),
       ),
   );
@@ -248,4 +261,39 @@ export async function createGraphTraceMcpServer(options: {
   await server.connect(transport);
 
   return server;
+}
+
+function toSymbolLocator(input: {
+  symbolId?: string;
+  filePath?: string;
+  symbolName?: string;
+  line?: number;
+  column?: number;
+}): SymbolLocator {
+  if (input.symbolId) {
+    return { symbolId: input.symbolId };
+  }
+
+  if (input.filePath && input.symbolName) {
+    return {
+      filePath: input.filePath,
+      symbolName: input.symbolName,
+    };
+  }
+
+  if (
+    input.filePath &&
+    typeof input.line === "number" &&
+    typeof input.column === "number"
+  ) {
+    return {
+      filePath: input.filePath,
+      line: input.line,
+      column: input.column,
+    };
+  }
+
+  throw new Error(
+    "Expected symbolId, filePath + symbolName, or filePath + line + column.",
+  );
 }

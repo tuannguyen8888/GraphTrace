@@ -1,5 +1,8 @@
 export function requireSession<TRequest, TResponse>(
-  handler: (request: TRequest, response: TResponse) => Promise<unknown> | unknown,
+  handler: (
+    request: TRequest,
+    response: TResponse,
+  ) => Promise<unknown> | unknown,
 ) {
   return async function wrappedSessionHandler(
     request: TRequest,
