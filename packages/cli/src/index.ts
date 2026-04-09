@@ -399,6 +399,8 @@ export async function runCli(
       let snapshot = await collectWorkspaceSnapshot(cwd);
       let processing = false;
       let queued = false;
+      let stopped = false;
+      let currentCycle: Promise<void> | null = null;
 
       emitStdout(
         formatWatchCycle(
@@ -413,65 +415,88 @@ export async function runCli(
       );
 
       const executeCycle = async () => {
+        if (stopped) {
+          return;
+        }
+
         if (processing) {
           queued = true;
           return;
         }
 
         processing = true;
-        try {
-          const nextSnapshot = await collectWorkspaceSnapshot(cwd);
-          const { changedFiles, removedFiles } = diffWorkspaceSnapshots(
-            snapshot,
-            nextSnapshot,
-          );
-
-          if (changedFiles.length > 0 || removedFiles.length > 0) {
-            const result = await runWorkspaceIndex({
-              workspaceRoot: cwd,
-              mode: "incremental",
-              changedFiles,
-              removedFiles,
-            });
-            snapshot = nextSnapshot;
-            emitStdout(
-              formatWatchCycle(
-                {
-                  trigger: "change",
-                  changedFiles,
-                  removedFiles,
-                  result,
-                },
-                asJson,
-              ),
+        currentCycle = (async () => {
+          try {
+            const nextSnapshot = await collectWorkspaceSnapshot(cwd);
+            const { changedFiles, removedFiles } = diffWorkspaceSnapshots(
+              snapshot,
+              nextSnapshot,
             );
-          } else {
-            snapshot = nextSnapshot;
+
+            if (changedFiles.length > 0 || removedFiles.length > 0) {
+              const result = await runWorkspaceIndex({
+                workspaceRoot: cwd,
+                mode: "incremental",
+                changedFiles,
+                removedFiles,
+              });
+              snapshot = nextSnapshot;
+              emitStdout(
+                formatWatchCycle(
+                  {
+                    trigger: "change",
+                    changedFiles,
+                    removedFiles,
+                    result,
+                  },
+                  asJson,
+                ),
+              );
+            } else {
+              snapshot = nextSnapshot;
+            }
+          } catch (error) {
+            emitStderr(
+              error instanceof Error
+                ? error.message
+                : `watch failed: ${String(error)}`,
+            );
+          } finally {
+            processing = false;
+            currentCycle = null;
+            if (queued && !stopped) {
+              queued = false;
+              void executeCycle();
+            }
           }
-        } catch (error) {
-          emitStderr(
-            error instanceof Error
-              ? error.message
-              : `watch failed: ${String(error)}`,
-          );
-        } finally {
-          processing = false;
-          if (queued) {
-            queued = false;
-            void executeCycle();
-          }
-        }
+        })();
+
+        await currentCycle;
       };
 
       const interval = setInterval(() => {
         void executeCycle();
       }, debounceMs);
-      const stop = () => {
+      const stop = async () => {
+        stopped = true;
+        queued = false;
         clearInterval(interval);
+        process.off("SIGINT", handleSigInt);
+        process.off("SIGTERM", handleSigTerm);
+        while (currentCycle) {
+          await currentCycle;
+        }
       };
 
-      process.once("SIGINT", stop);
-      process.once("SIGTERM", stop);
+      const handleSigInt = () => {
+        void stop();
+      };
+      const handleSigTerm = () => {
+        void stop();
+      };
+
+      process.once("SIGINT", handleSigInt);
+      process.once("SIGTERM", handleSigTerm);
 
       return {
         exitCode: 0,
