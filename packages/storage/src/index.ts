@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import type {
   DependencyDirection,
+  GraphEnvelope,
   DiscoveredUnit,
   GraphItem,
   IndexRunInfo,
@@ -14,6 +15,7 @@ import type {
   SearchItem,
 } from "@graphtrace/shared";
 import {
+  createGraphEnvelope,
   deriveRepositories,
   pathBelongsToRepository,
 } from "@graphtrace/shared";
@@ -446,6 +448,7 @@ export class GraphStore {
       path: string | null;
       text: string;
     }>;
+    const graph = this.emptyGraphEnvelope();
 
     return {
       items: rows.map((row, index) => ({
@@ -455,6 +458,7 @@ export class GraphStore {
         path: row.path ?? undefined,
         score: 100 - index,
       })),
+      graph,
     };
   }
 
@@ -464,10 +468,12 @@ export class GraphStore {
     kind?: string,
   ): QueryResult<SearchItem> {
     const repositories = this.repositories();
+    const result = this.search(query, kind);
     return {
-      items: this.search(query, kind).items.filter((item) =>
+      items: result.items.filter((item) =>
         pathBelongsToRepository(item.path, repositoryId, repositories),
       ),
+      graph: result.graph,
     };
   }
 
@@ -825,6 +831,10 @@ export class GraphStore {
       path,
       confidence,
     };
+  }
+
+  private emptyGraphEnvelope(): GraphEnvelope {
+    return createGraphEnvelope();
   }
 
   stats(): IndexSummary {
