@@ -150,6 +150,9 @@ function resolveTargetSymbolId(
     const declarationFilePath = toPosixPath(
       relativePath(workspaceRoot, declaration.getSourceFile().fileName),
     );
+    if (!isWorkspaceSourcePath(declarationFilePath)) {
+      continue;
+    }
     const symbolId = symbolIdFromDeclaration(declaration, declarationFilePath);
     if (symbolId) {
       return symbolId;
@@ -181,5 +184,14 @@ function isDeclarationName(node: ts.Identifier): boolean {
 function isPropertyName(node: ts.Identifier): boolean {
   return (
     ts.isPropertyAccessExpression(node.parent) && node.parent.name === node
+  );
+}
+
+function isWorkspaceSourcePath(filePath: string): boolean {
+  return !(
+    filePath === ".." ||
+    filePath.startsWith("../") ||
+    filePath === "node_modules" ||
+    filePath.startsWith("node_modules/")
   );
 }

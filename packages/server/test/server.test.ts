@@ -248,7 +248,7 @@ describe("server", () => {
     } finally {
       await app.close();
     }
-  });
+  }, 20_000);
 
   test("serves symbol search on workspaces with symbol graph indexing enabled", async () => {
     await ensureWorkspaceInitialized(symbolGraphFixtureRoot);

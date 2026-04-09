@@ -754,6 +754,57 @@ describe("web ui view-model", () => {
     ]);
   });
 
+  test("keeps compact callback investigations focused without extra expansion actions", () => {
+    const controls = buildSymbolGraphControlsState({
+      graph: createGraphEnvelope({
+        nodes: [
+          {
+            id: "symbol:apps/web/src/dashboard.tsx#Dashboard",
+            kind: "symbol",
+            label: "Dashboard",
+            path: "apps/web/src/dashboard.tsx",
+          },
+          {
+            id: "symbol:apps/web/src/dashboard.tsx#Dashboard.loadProfile",
+            kind: "symbol",
+            label: "Dashboard.loadProfile",
+            path: "apps/web/src/dashboard.tsx",
+          },
+        ],
+        edges: [
+          {
+            id: "edge:calls:Dashboard->loadProfile",
+            type: "calls",
+            sourceId: "symbol:apps/web/src/dashboard.tsx#Dashboard",
+            sourceKind: "symbol",
+            targetId: "symbol:apps/web/src/dashboard.tsx#Dashboard.loadProfile",
+            targetKind: "symbol",
+            confidence: 1,
+            confidenceLabel: "proven",
+          },
+        ],
+        summary: {
+          rootNodeIds: ["symbol:apps/web/src/dashboard.tsx#Dashboard"],
+          confidence: {
+            proven: 1,
+          },
+        },
+      }),
+      mode: "execution",
+      confidenceFilter: "strong",
+      labels: {
+        showWeakerEdges: "Show weaker edges",
+        expandCallers: "Expand callers",
+        expandCallees: "Expand callees",
+        openImpact: "Open impact",
+      },
+    });
+
+    expect(controls.actions.map((action) => action.id)).toEqual([
+      "open-impact",
+    ]);
+  });
+
   test("derives route insights for related packages and query hints", () => {
     const flowItems: GraphItem[] = [
       {
