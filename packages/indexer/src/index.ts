@@ -25,7 +25,12 @@ import { openGraphStore } from "@graphtrace/storage";
 import { extractExecutionFlow } from "./extract-execution-flow";
 import { extractSymbols } from "./extract-symbols";
 import { extractReferences } from "./extract-references";
-import { buildInlineRouteHandlerId } from "./symbol-graph-types";
+import {
+  buildInlineRouteHandlerId,
+  findWrappedCallbackExpression,
+  routeCallDetails,
+  symbolIdFromDeclaration,
+} from "./symbol-graph-types";
 import { type WorkspacePackageInfo, inspectWorkspace } from "./workspace";
 
 export { inspectWorkspace } from "./workspace";
@@ -479,8 +484,8 @@ function extractRoutes(
       routes.push(
         ...extractHttpRoutes(
           workspaceRoot,
+          sourceFile,
           filePath,
-          sourceText,
           imports,
           symbols,
           unitId,
@@ -500,89 +505,49 @@ function extractRoutes(
 
 function extractHttpRoutes(
   workspaceRoot: string,
+  sourceFile: ts.SourceFile,
   filePath: string,
-  sourceText: string,
   imports: Array<{ localName: string; resolvedPath: string | null }>,
   symbols: Array<{ id: string; name: string }>,
   unitId: string,
   framework: "express" | "fastify",
 ): RouteItem[] {
   const routes: RouteItem[] = [];
-  const routerMatches = [
-    ...sourceText.matchAll(
-      /\b([A-Za-z0-9_]+)\.(get|post|put|patch|delete)\(\s*["'`](.*?)["'`]\s*,\s*([A-Za-z0-9_]+)/g,
-    ),
-  ];
-  const inlineMatches = [
-    ...sourceText.matchAll(
-      /\b([A-Za-z0-9_]+)\.(get|post|put|patch|delete)\(\s*["'`](.*?)["'`]\s*,\s*(?:async\s+)?\(/g,
-    ),
-  ];
-
-  for (const match of routerMatches) {
-    const receiver = match[1];
-    if (
-      framework === "fastify" &&
-      !receiver.toLowerCase().includes("fastify") &&
-      receiver !== "app"
-    ) {
-      continue;
-    }
-    const method = match[2].toUpperCase();
-    const path = match[3];
-    const handlerName = match[4];
-    const importedHandler = imports.find(
-      (entry) => entry.localName === handlerName && entry.resolvedPath,
-    );
-    const localHandler = symbols.find((entry) => entry.name === handlerName);
-    const handlerSymbolId = importedHandler?.resolvedPath
-      ? `symbol:${toPosixPath(relativePath(workspaceRoot, importedHandler.resolvedPath))}#${handlerName}`
-      : (localHandler?.id ?? `symbol:${toPosixPath(filePath)}#${handlerName}`);
-
-    routes.push({
-      id: `${method} ${path}`,
-      method,
-      path,
-      handlerName,
-      handlerSymbolId,
-      filePath: toPosixPath(filePath),
-      framework,
-      unitId,
-      confidence: 0.95,
-      provenance: buildProvenance(`framework:${framework}`, 0.95),
-    });
-  }
-
-  for (const match of inlineMatches) {
-    const receiver = match[1];
-    if (
-      framework === "fastify" &&
-      !receiver.toLowerCase().includes("fastify") &&
-      receiver !== "app"
-    ) {
-      continue;
+  const visit = (node: ts.Node) => {
+    if (ts.isCallExpression(node)) {
+      const route = routeCallDetails(node);
+      if (route && isSupportedRouteReceiver(route.receiver, framework)) {
+        const handler = resolveHttpRouteHandler(
+          workspaceRoot,
+          filePath,
+          node,
+          imports,
+          symbols,
+        );
+        if (handler) {
+          routes.push({
+            id: `${route.method.toUpperCase()} ${route.routePath}`,
+            method: route.method.toUpperCase(),
+            path: route.routePath,
+            handlerName: handler.name,
+            handlerSymbolId: handler.symbolId,
+            filePath: toPosixPath(filePath),
+            framework,
+            unitId,
+            confidence: handler.inline ? 0.9 : 0.95,
+            provenance: buildProvenance(
+              `framework:${framework}`,
+              handler.inline ? 0.9 : 0.95,
+            ),
+          });
+        }
+      }
     }
 
-    const method = match[2].toUpperCase();
-    const path = match[3];
-    routes.push({
-      id: `${method} ${path}`,
-      method,
-      path,
-      handlerName: `${receiver}.${method.toLowerCase()}.${path.replace(/^\/+/, "") || "root"}`,
-      handlerSymbolId: buildInlineRouteHandlerId(
-        filePath,
-        receiver,
-        method,
-        path,
-      ),
-      filePath: toPosixPath(filePath),
-      framework,
-      unitId,
-      confidence: 0.9,
-      provenance: buildProvenance(`framework:${framework}`, 0.9),
-    });
-  }
+    ts.forEachChild(node, visit);
+  };
+
+  ts.forEachChild(sourceFile, visit);
 
   return routes;
 }
@@ -661,7 +626,9 @@ function extractNestRoutes(
         method: routeDecorator.method,
         path: fullPath,
         handlerName: member.name.text,
-        handlerSymbolId: `symbol:${toPosixPath(filePath)}#${member.name.text}`,
+        handlerSymbolId:
+          symbolIdFromDeclaration(member, toPosixPath(filePath)) ??
+          `symbol:${toPosixPath(filePath)}#${member.name.text}`,
         filePath: toPosixPath(filePath),
         framework: "nest",
         unitId,
@@ -732,6 +699,80 @@ function joinRouteSegments(controllerPath: string, methodPath: string): string {
     .filter(Boolean);
 
   return `/${segments.join("/")}`;
+}
+
+function isSupportedRouteReceiver(
+  receiver: string,
+  framework: "express" | "fastify",
+): boolean {
+  return !(
+    framework === "fastify" &&
+    !receiver.toLowerCase().includes("fastify") &&
+    receiver !== "app"
+  );
+}
+
+function resolveHttpRouteHandler(
+  workspaceRoot: string,
+  filePath: string,
+  routeCall: ts.CallExpression,
+  imports: Array<{ localName: string; resolvedPath: string | null }>,
+  symbols: Array<{ id: string; name: string }>,
+): { name: string; symbolId: string; inline: boolean } | null {
+  const route = routeCallDetails(routeCall);
+  if (!route) {
+    return null;
+  }
+
+  const handlerExpression = routeCall.arguments
+    .slice(1)
+    .findLast((argument) =>
+      ts.isIdentifier(argument) ||
+      ts.isArrowFunction(argument) ||
+      ts.isFunctionExpression(argument) ||
+      ts.isCallExpression(argument),
+    );
+
+  if (!handlerExpression) {
+    return null;
+  }
+
+  const inlineCallback = findWrappedCallbackExpression(handlerExpression);
+  if (inlineCallback) {
+    return {
+      name:
+        inlineCallback.name?.text ??
+        `${route.receiver}.${route.method}.${route.routePath.replace(/^\/+/, "") || "root"}`,
+      symbolId: buildInlineRouteHandlerId(
+        filePath,
+        route.receiver,
+        route.method,
+        route.routePath,
+      ),
+      inline: true,
+    };
+  }
+
+  if (ts.isIdentifier(handlerExpression)) {
+    const importedHandler = imports.find(
+      (entry) =>
+        entry.localName === handlerExpression.text && entry.resolvedPath,
+    );
+    const localHandler = symbols.find(
+      (entry) => entry.name === handlerExpression.text,
+    );
+
+    return {
+      name: handlerExpression.text,
+      symbolId: importedHandler?.resolvedPath
+        ? `symbol:${toPosixPath(relativePath(workspaceRoot, importedHandler.resolvedPath))}#${handlerExpression.text}`
+        : (localHandler?.id ??
+          `symbol:${toPosixPath(filePath)}#${handlerExpression.text}`),
+      inline: false,
+    };
+  }
+
+  return null;
 }
 
 function extractQueryHints(

@@ -45,45 +45,8 @@ export function symbolIdFromDeclaration(
   declaration: ts.Declaration,
   filePath: string,
 ): string | null {
-  if (ts.isFunctionDeclaration(declaration) && declaration.name) {
-    return buildSymbolId(filePath, declaration.name.text);
-  }
-
-  if (ts.isClassDeclaration(declaration) && declaration.name) {
-    return buildSymbolId(filePath, declaration.name.text);
-  }
-
-  if (ts.isVariableDeclaration(declaration) && ts.isIdentifier(declaration.name)) {
-    if (!isTopLevelVariableDeclaration(declaration)) {
-      return null;
-    }
-    return buildSymbolId(filePath, declaration.name.text);
-  }
-
-  if (
-    ts.isMethodDeclaration(declaration) &&
-    declaration.name &&
-    ts.isIdentifier(declaration.name)
-  ) {
-    const ownerName = ownerNameForMember(declaration);
-    if (ownerName) {
-      return buildSymbolId(filePath, `${ownerName}.${declaration.name.text}`);
-    }
-  }
-
-  if (
-    ts.isPropertyAssignment(declaration) &&
-    ts.isIdentifier(declaration.name) &&
-    (ts.isArrowFunction(declaration.initializer) ||
-      ts.isFunctionExpression(declaration.initializer))
-  ) {
-    const ownerName = ownerNameForObjectLiteral(declaration.parent);
-    if (ownerName) {
-      return buildSymbolId(filePath, `${ownerName}.${declaration.name.text}`);
-    }
-  }
-
-  return null;
+  const localName = symbolLocalNameFromDeclaration(declaration);
+  return localName ? buildSymbolId(filePath, localName) : null;
 }
 
 export function routeCallDetails(
@@ -117,11 +80,7 @@ export function inlineRouteHandlerSymbolId(
   node: ts.ArrowFunction | ts.FunctionExpression,
   filePath: string,
 ): string | null {
-  if (!ts.isCallExpression(node.parent)) {
-    return null;
-  }
-
-  const route = routeCallDetails(node.parent);
+  const route = findEnclosingRouteCall(node);
   if (!route) {
     return null;
   }
@@ -132,6 +91,94 @@ export function inlineRouteHandlerSymbolId(
     route.method,
     route.routePath,
   );
+}
+
+export function findWrappedCallbackExpression(
+  node: ts.Node,
+): ts.ArrowFunction | ts.FunctionExpression | null {
+  if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+    return node;
+  }
+
+  if (ts.isParenthesizedExpression(node)) {
+    return findWrappedCallbackExpression(node.expression);
+  }
+
+  if (ts.isCallExpression(node)) {
+    for (let index = node.arguments.length - 1; index >= 0; index -= 1) {
+      const callback = findWrappedCallbackExpression(node.arguments[index]);
+      if (callback) {
+        return callback;
+      }
+    }
+  }
+
+  return null;
+}
+
+export function symbolLocalNameFromDeclaration(
+  declaration: ts.Declaration,
+): string | null {
+  if (ts.isFunctionDeclaration(declaration) && declaration.name) {
+    return appendOwnerLocalName(declaration.name.text, declaration);
+  }
+
+  if (ts.isClassDeclaration(declaration) && declaration.name) {
+    return appendOwnerLocalName(declaration.name.text, declaration);
+  }
+
+  if (ts.isVariableDeclaration(declaration) && ts.isIdentifier(declaration.name)) {
+    if (isTopLevelVariableDeclaration(declaration)) {
+      return declaration.name.text;
+    }
+
+    if (!supportsNestedVariableSymbol(declaration)) {
+      return null;
+    }
+
+    return appendOwnerLocalName(declaration.name.text, declaration);
+  }
+
+  if (
+    ts.isMethodDeclaration(declaration) &&
+    declaration.name &&
+    ts.isIdentifier(declaration.name)
+  ) {
+    const ownerName = ownerNameForMember(declaration);
+    return ownerName ? `${ownerName}.${declaration.name.text}` : null;
+  }
+
+  if (
+    ts.isPropertyAssignment(declaration) &&
+    ts.isIdentifier(declaration.name) &&
+    supportsPropertySymbol(declaration)
+  ) {
+    const ownerName = ownerNameForObjectLiteral(declaration.parent);
+    return ownerName ? `${ownerName}.${declaration.name.text}` : null;
+  }
+
+  return null;
+}
+
+export function ownerSymbolInfoForDeclaration(
+  declaration: ts.Declaration,
+  filePath: string,
+): { id: string; kind: SymbolDescriptor["kind"] } | null {
+  const ownerDeclaration = findOwnerDeclaration(declaration);
+  if (!ownerDeclaration) {
+    return null;
+  }
+
+  const ownerLocalName = symbolLocalNameFromDeclaration(ownerDeclaration);
+  const ownerKind = symbolKindFromDeclaration(ownerDeclaration);
+  if (!ownerLocalName || !ownerKind) {
+    return null;
+  }
+
+  return {
+    id: buildSymbolId(filePath, ownerLocalName),
+    kind: ownerKind,
+  };
 }
 
 export function buildSourceSpan(
@@ -186,10 +233,16 @@ function ownerNameForMember(
 function ownerNameForObjectLiteral(node: ts.ObjectLiteralExpression): string | null {
   if (
     ts.isVariableDeclaration(node.parent) &&
-    ts.isIdentifier(node.parent.name) &&
-    isTopLevelVariableDeclaration(node.parent)
+    ts.isIdentifier(node.parent.name)
   ) {
-    return node.parent.name.text;
+    return symbolLocalNameFromDeclaration(node.parent);
+  }
+
+  if (
+    ts.isPropertyAssignment(node.parent) &&
+    ts.isIdentifier(node.parent.name)
+  ) {
+    return symbolLocalNameFromDeclaration(node.parent);
   }
 
   return null;
@@ -201,4 +254,132 @@ function isTopLevelVariableDeclaration(node: ts.VariableDeclaration): boolean {
     ts.isVariableStatement(node.parent.parent) &&
     ts.isSourceFile(node.parent.parent.parent)
   );
+}
+
+function findEnclosingRouteCall(
+  node: ts.ArrowFunction | ts.FunctionExpression,
+): { receiver: string; method: string; routePath: string } | null {
+  let current: ts.Node | undefined = node.parent;
+
+  while (current) {
+    if (ts.isCallExpression(current)) {
+      const route = routeCallDetails(current);
+      if (route) {
+        return route;
+      }
+    }
+
+    if (ts.isFunctionLike(current)) {
+      return null;
+    }
+
+    current = current.parent;
+  }
+
+  return null;
+}
+
+function appendOwnerLocalName(
+  localName: string,
+  declaration: ts.Declaration,
+): string | null {
+  const ownerDeclaration = findOwnerDeclaration(declaration);
+  if (!ownerDeclaration) {
+    return localName;
+  }
+
+  const ownerLocalName = symbolLocalNameFromDeclaration(ownerDeclaration);
+  return ownerLocalName ? `${ownerLocalName}.${localName}` : localName;
+}
+
+function findOwnerDeclaration(node: ts.Node): ts.Declaration | null {
+  let current: ts.Node | undefined = node.parent;
+
+  while (current) {
+    if (
+      ts.isFunctionDeclaration(current) ||
+      ts.isClassDeclaration(current) ||
+      ts.isMethodDeclaration(current) ||
+      ts.isPropertyAssignment(current) ||
+      ts.isVariableDeclaration(current)
+    ) {
+      return current;
+    }
+
+    current = current.parent;
+  }
+
+  return null;
+}
+
+function supportsNestedVariableSymbol(
+  declaration: ts.VariableDeclaration,
+): boolean {
+  const initializer = declaration.initializer;
+  return Boolean(
+    initializer &&
+      (ts.isArrowFunction(initializer) ||
+        ts.isFunctionExpression(initializer) ||
+        ts.isObjectLiteralExpression(initializer) ||
+        findWrappedCallbackExpression(initializer)),
+  );
+}
+
+function supportsPropertySymbol(declaration: ts.PropertyAssignment): boolean {
+  return (
+    ts.isObjectLiteralExpression(declaration.initializer) ||
+    ts.isArrowFunction(declaration.initializer) ||
+    ts.isFunctionExpression(declaration.initializer)
+  );
+}
+
+function symbolKindFromDeclaration(
+  declaration: ts.Declaration,
+): SymbolDescriptor["kind"] | null {
+  if (ts.isFunctionDeclaration(declaration)) {
+    return "function";
+  }
+
+  if (ts.isClassDeclaration(declaration)) {
+    return "class";
+  }
+
+  if (ts.isMethodDeclaration(declaration)) {
+    return "method";
+  }
+
+  if (ts.isVariableDeclaration(declaration)) {
+    if (!declaration.initializer) {
+      return "variable";
+    }
+
+    if (ts.isObjectLiteralExpression(declaration.initializer)) {
+      return "object";
+    }
+
+    if (
+      ts.isArrowFunction(declaration.initializer) ||
+      ts.isFunctionExpression(declaration.initializer) ||
+      findWrappedCallbackExpression(declaration.initializer)
+    ) {
+      return "function";
+    }
+
+    return "variable";
+  }
+
+  if (ts.isPropertyAssignment(declaration)) {
+    if (ts.isObjectLiteralExpression(declaration.initializer)) {
+      return "object";
+    }
+
+    if (
+      ts.isArrowFunction(declaration.initializer) ||
+      ts.isFunctionExpression(declaration.initializer)
+    ) {
+      return "function";
+    }
+  }
+
+  return null;
 }
