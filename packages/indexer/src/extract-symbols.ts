@@ -9,7 +9,10 @@ import {
   buildSourceSpan,
   buildSymbolId,
   detectSymbolLanguage,
+  findWrappedCallbackExpression,
   HTTP_ROUTE_METHODS,
+  ownerSymbolInfoForDeclaration,
+  symbolLocalNameFromDeclaration,
 } from "./symbol-graph-types";
 
 export function extractSymbols(
@@ -39,145 +42,100 @@ export function extractSymbols(
 
   const visitNode = (node: ts.Node) => {
     if (ts.isFunctionDeclaration(node) && node.name) {
+      const localName = symbolLocalNameFromDeclaration(node) ?? node.name.text;
+      const owner = ownerSymbolInfoForDeclaration(node, normalizedFilePath);
       addSymbol({
-        id: buildSymbolId(normalizedFilePath, node.name.text),
+        id: buildSymbolId(normalizedFilePath, localName),
         name: node.name.text,
+        displayName: localName,
         kind: "function",
         exported: hasExportModifier(node),
+        ownerSymbolId: owner?.id,
+        ownerKind: owner?.kind,
         signatureText: buildSignatureText(sourceFile, node.parameters),
         span: buildSourceSpan(sourceFile, node),
       });
     }
 
     if (ts.isClassDeclaration(node) && node.name) {
-      const classId = buildSymbolId(normalizedFilePath, node.name.text);
+      const localName = symbolLocalNameFromDeclaration(node) ?? node.name.text;
+      const owner = ownerSymbolInfoForDeclaration(node, normalizedFilePath);
       addSymbol({
-        id: classId,
+        id: buildSymbolId(normalizedFilePath, localName),
         name: node.name.text,
+        displayName: localName,
         kind: "class",
         exported: hasExportModifier(node),
+        ownerSymbolId: owner?.id,
+        ownerKind: owner?.kind,
         span: buildSourceSpan(sourceFile, node),
       });
+    }
 
-      for (const member of node.members) {
-        if (
-          !ts.isMethodDeclaration(member) ||
-          !member.name ||
-          !ts.isIdentifier(member.name)
-        ) {
-          continue;
-        }
-
+    if (ts.isMethodDeclaration(node) && node.name && ts.isIdentifier(node.name)) {
+      const localName = symbolLocalNameFromDeclaration(node);
+      const owner = ownerSymbolInfoForDeclaration(node, normalizedFilePath);
+      if (localName && owner) {
         addSymbol({
-          id: buildSymbolId(
-            normalizedFilePath,
-            `${node.name.text}.${member.name.text}`,
-          ),
-          name: member.name.text,
-          displayName: `${node.name.text}.${member.name.text}`,
+          id: buildSymbolId(normalizedFilePath, localName),
+          name: node.name.text,
+          displayName: localName,
           kind: "method",
-          exported: hasExportModifier(node),
-          ownerSymbolId: classId,
-          ownerKind: "class",
-          signatureText: buildSignatureText(sourceFile, member.parameters),
-          span: buildSourceSpan(sourceFile, member),
+          exported: isDeclarationExported(node),
+          ownerSymbolId: owner.id,
+          ownerKind: owner.kind,
+          signatureText: buildSignatureText(sourceFile, node.parameters),
+          span: buildSourceSpan(sourceFile, node),
         });
       }
     }
 
-    if (ts.isVariableStatement(node)) {
-      if (!ts.isSourceFile(node.parent)) {
-        ts.forEachChild(node, visitNode);
-        return;
-      }
-
-      const exported = hasExportModifier(node);
-
-      for (const declaration of node.declarationList.declarations) {
-        if (!ts.isIdentifier(declaration.name)) {
-          continue;
-        }
-
-        const variableName = declaration.name.text;
-        const variableId = buildSymbolId(normalizedFilePath, variableName);
-        const isObjectLiteral = ts.isObjectLiteralExpression(
-          declaration.initializer,
-        );
-        const isCallableInitializer =
-          declaration.initializer &&
-          (ts.isArrowFunction(declaration.initializer) ||
-            ts.isFunctionExpression(declaration.initializer));
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+      const localName = symbolLocalNameFromDeclaration(node);
+      if (localName) {
+        const owner = ownerSymbolInfoForDeclaration(node, normalizedFilePath);
+        const callableInitializer = extractCallableInitializer(node.initializer);
 
         addSymbol({
-          id: variableId,
-          name: variableName,
-          kind: isObjectLiteral
+          id: buildSymbolId(normalizedFilePath, localName),
+          name: node.name.text,
+          displayName: localName,
+          kind: classifyDeclarationKind(node.initializer, callableInitializer),
+          exported: isDeclarationExported(node),
+          ownerSymbolId: owner?.id,
+          ownerKind: owner?.kind,
+          signatureText: callableInitializer
+            ? buildSignatureText(sourceFile, callableInitializer.parameters)
+            : undefined,
+          span: buildSourceSpan(sourceFile, node.initializer ?? node),
+        });
+      }
+    }
+
+    if (ts.isPropertyAssignment(node) && ts.isIdentifier(node.name)) {
+      const localName = symbolLocalNameFromDeclaration(node);
+      const owner = ownerSymbolInfoForDeclaration(node, normalizedFilePath);
+      const callableInitializer = extractCallableInitializer(node.initializer);
+
+      if (localName && owner && (callableInitializer || ts.isObjectLiteralExpression(node.initializer))) {
+        addSymbol({
+          id: buildSymbolId(normalizedFilePath, localName),
+          name: node.name.text,
+          displayName: localName,
+          kind: ts.isObjectLiteralExpression(node.initializer)
             ? "object"
-            : isCallableInitializer
-              ? "function"
-              : "variable",
-          exported,
-          signatureText: isCallableInitializer
-            ? buildSignatureText(sourceFile, declaration.initializer.parameters)
+            : "function",
+          exported: isDeclarationExported(node),
+          ownerSymbolId: owner.id,
+          ownerKind: owner.kind,
+          signatureText: callableInitializer
+            ? buildSignatureText(sourceFile, callableInitializer.parameters)
             : undefined,
           span: buildSourceSpan(
             sourceFile,
-            declaration.initializer ?? declaration,
+            callableInitializer ?? node.initializer,
           ),
         });
-
-        if (ts.isObjectLiteralExpression(declaration.initializer)) {
-          for (const property of declaration.initializer.properties) {
-            if (
-              ts.isMethodDeclaration(property) &&
-              ts.isIdentifier(property.name)
-            ) {
-              addSymbol({
-                id: buildSymbolId(
-                  normalizedFilePath,
-                  `${variableName}.${property.name.text}`,
-                ),
-                name: property.name.text,
-                displayName: `${variableName}.${property.name.text}`,
-                kind: "method",
-                exported,
-                ownerSymbolId: variableId,
-                ownerKind: "object",
-                signatureText: buildSignatureText(
-                  sourceFile,
-                  property.parameters,
-                ),
-                span: buildSourceSpan(sourceFile, property),
-              });
-              continue;
-            }
-
-            if (
-              ts.isPropertyAssignment(property) &&
-              ts.isIdentifier(property.name) &&
-              (ts.isArrowFunction(property.initializer) ||
-                ts.isFunctionExpression(property.initializer))
-            ) {
-              addSymbol({
-                id: buildSymbolId(
-                  normalizedFilePath,
-                  `${variableName}.${property.name.text}`,
-                ),
-                name: property.name.text,
-                displayName: `${variableName}.${property.name.text}`,
-                kind: "function",
-                exported,
-                ownerSymbolId: variableId,
-                ownerKind: "object",
-                signatureText: buildSignatureText(
-                  sourceFile,
-                  property.initializer.parameters,
-                ),
-                span: buildSourceSpan(sourceFile, property.initializer),
-              });
-            }
-          }
-        }
       }
     }
 
@@ -190,10 +148,9 @@ export function extractSymbols(
       const method = node.expression.name.text.toLowerCase();
       const [firstArgument] = node.arguments;
       const handler =
-        node.arguments.findLast(
-          (argument) =>
-            ts.isArrowFunction(argument) || ts.isFunctionExpression(argument),
-        ) ?? null;
+        node.arguments
+          .map((argument) => extractCallableInitializer(argument))
+          .findLast(Boolean) ?? null;
 
       if (
         handler &&
@@ -232,4 +189,59 @@ function hasExportModifier(node: ts.Node): boolean {
   return (node.modifiers ?? []).some(
     (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
   );
+}
+
+function isDeclarationExported(node: ts.Node): boolean {
+  if (ts.isVariableDeclaration(node)) {
+    return (
+      ts.isVariableDeclarationList(node.parent) &&
+      ts.isVariableStatement(node.parent.parent) &&
+      hasExportModifier(node.parent.parent)
+    );
+  }
+
+  if (ts.isMethodDeclaration(node) && ts.isClassDeclaration(node.parent)) {
+    return hasExportModifier(node.parent);
+  }
+
+  if (
+    ts.isPropertyAssignment(node) &&
+    ts.isObjectLiteralExpression(node.parent) &&
+    ts.isVariableDeclaration(node.parent.parent) &&
+    ts.isVariableDeclarationList(node.parent.parent.parent) &&
+    ts.isVariableStatement(node.parent.parent.parent.parent)
+  ) {
+    return hasExportModifier(node.parent.parent.parent.parent);
+  }
+
+  return hasExportModifier(node);
+}
+
+function extractCallableInitializer(
+  node?: ts.Node,
+): ts.ArrowFunction | ts.FunctionExpression | null {
+  if (!node) {
+    return null;
+  }
+
+  if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+    return node;
+  }
+
+  return findWrappedCallbackExpression(node);
+}
+
+function classifyDeclarationKind(
+  initializer: ts.Expression | undefined,
+  callableInitializer: ts.ArrowFunction | ts.FunctionExpression | null,
+): SymbolDescriptor["kind"] {
+  if (initializer && ts.isObjectLiteralExpression(initializer)) {
+    return "object";
+  }
+
+  if (callableInitializer) {
+    return "function";
+  }
+
+  return "variable";
 }

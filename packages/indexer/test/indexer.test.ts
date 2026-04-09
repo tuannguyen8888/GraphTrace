@@ -29,6 +29,11 @@ const symbolGraphFixtureRoot = join(
   "fixtures",
   "symbol-graph-workspace",
 );
+const reactCallbackFixtureRoot = join(
+  process.cwd(),
+  "fixtures",
+  "react-callback-workspace",
+);
 
 describe("indexWorkspace", () => {
   test("indexes packages, symbols, routes, and query edges from the fixture workspace", async () => {
@@ -68,6 +73,25 @@ describe("indexWorkspace", () => {
 
     expect(result.summary.routeCount).toBe(1);
     expect(result.summary.queryEdgeCount).toBeGreaterThanOrEqual(1);
+  });
+
+  test("maps nest routes to controller method symbols", async () => {
+    await ensureWorkspaceInitialized(nestFixtureRoot);
+
+    await indexWorkspace({
+      workspaceRoot: nestFixtureRoot,
+      full: true,
+    });
+
+    const store = openGraphStore(join(nestFixtureRoot, ".graphtrace", "index.db"));
+
+    try {
+      expect(store.routeById("GET /users")).toMatchObject({
+        handlerSymbolId: "symbol:apps/api/src/users.controller.ts#UsersController.listUsers",
+      });
+    } finally {
+      store.close();
+    }
   });
 
   test("indexes fastify routes", async () => {
@@ -300,6 +324,76 @@ describe("indexWorkspace", () => {
             type: "queries",
             sourceId: "symbol:apps/api/src/services/user-service.ts#listUsers",
             targetId: "query:apps/api/src/services/user-service.ts#prisma.user.findMany(",
+          }),
+        ]),
+      });
+    } finally {
+      store.close();
+    }
+  });
+
+  test("covers React callbacks, nested object ownership, and wrapped inline route handlers", async () => {
+    await ensureWorkspaceInitialized(reactCallbackFixtureRoot);
+
+    await indexWorkspace({
+      workspaceRoot: reactCallbackFixtureRoot,
+      full: true,
+    });
+
+    const store = openGraphStore(
+      join(reactCallbackFixtureRoot, ".graphtrace", "index.db"),
+    );
+
+    try {
+      expect(
+        store.symbolById("symbol:apps/web/src/dashboard.tsx#Dashboard.loadProfile"),
+      ).toMatchObject({
+        kind: "function",
+        ownerSymbolId: "symbol:apps/web/src/dashboard.tsx#Dashboard",
+        ownerKind: "function",
+      });
+      expect(
+        store.symbolById(
+          "symbol:apps/web/src/dashboard.tsx#services.profile.loadProfile",
+        ),
+      ).toMatchObject({
+        kind: "method",
+        ownerSymbolId: "symbol:apps/web/src/dashboard.tsx#services.profile",
+        ownerKind: "object",
+      });
+      expect(
+        store.routeById("GET /reports"),
+      ).toMatchObject({
+        handlerSymbolId: "symbol:apps/api/src/routes/reports.ts#router.get.reports",
+      });
+      expect(
+        store.symbolNeighbors("symbol:apps/web/src/dashboard.tsx#Dashboard.loadProfile"),
+      ).toMatchObject({
+        edges: expect.arrayContaining([
+          expect.objectContaining({
+            type: "calls",
+            sourceId: "symbol:apps/web/src/dashboard.tsx#Dashboard.loadProfile",
+            targetId:
+              "symbol:apps/web/src/dashboard.tsx#services.profile.loadProfile",
+            confidenceLabel: "proven",
+          }),
+        ]),
+      });
+      expect(
+        store.symbolNeighbors("symbol:apps/api/src/routes/reports.ts#router.get.reports"),
+      ).toMatchObject({
+        edges: expect.arrayContaining([
+          expect.objectContaining({
+            type: "routes_to",
+            sourceId: "GET /reports",
+            targetId: "symbol:apps/api/src/routes/reports.ts#router.get.reports",
+          }),
+          expect.objectContaining({
+            type: "calls",
+            sourceId: "symbol:apps/api/src/routes/reports.ts#router.get.reports",
+            targetId:
+              "symbol:apps/api/src/services/report-service.ts#reportService.listReports",
+            confidenceLabel: "proven",
           }),
         ]),
       });
