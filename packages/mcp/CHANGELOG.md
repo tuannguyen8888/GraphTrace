@@ -1,5 +1,22 @@
 # @graphtrace/mcp
 
+## 1.5.0
+
+### Minor Changes
+
+- Add end-to-end symbol execution graph support across indexing, query, MCP, server, and web UI flows.
+
+  Improve symbol extraction for nested callbacks, wrapped route handlers, and framework-owned execution chains so real-world repos resolve stable callable symbols more reliably.
+
+  Harden symbol investigations with confidence-aware graph summaries, bounded impact expansion, and filtering that keeps tawaco and self-host symbol graphs focused on workspace-local code.
+
+### Patch Changes
+
+- Updated dependencies
+  - @graphtrace/query-engine@1.5.0
+  - @graphtrace/shared@1.5.0
+  - @graphtrace/storage@1.5.0
+
 ## 1.4.0
 
 ### Patch Changes
