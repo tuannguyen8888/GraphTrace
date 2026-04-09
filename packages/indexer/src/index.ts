@@ -22,6 +22,7 @@ import {
   toPosixPath,
 } from "@graphtrace/shared";
 import { openGraphStore } from "@graphtrace/storage";
+import { extractExecutionFlow } from "./extract-execution-flow";
 import { extractSymbols } from "./extract-symbols";
 import { extractReferences } from "./extract-references";
 import { buildInlineRouteHandlerId } from "./symbol-graph-types";
@@ -166,7 +167,7 @@ export async function indexWorkspace(
         .filter((match) => match.kind === "framework-plugin" && match.matched)
         .map((match) => match.pluginId) ?? [],
     );
-    for (const route of extractRoutes(
+    const routes = extractRoutes(
       options.workspaceRoot,
       sourceFile,
       sourceText,
@@ -175,8 +176,21 @@ export async function indexWorkspace(
       symbolMap,
       owningUnit?.id ?? "unit:root",
       matchedPluginIds,
-    )) {
+    );
+    for (const route of routes) {
       store.upsertRoute(route);
+    }
+
+    for (const edge of extractExecutionFlow({
+      workspaceRoot: options.workspaceRoot,
+      sourceFile,
+      sourceText,
+      filePath,
+      checker,
+      routes,
+      symbols: symbolMap,
+    })) {
+      store.upsertSymbolEdge(edge);
     }
 
     for (const query of extractQueryHints(
