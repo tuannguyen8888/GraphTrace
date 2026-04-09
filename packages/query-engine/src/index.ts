@@ -131,6 +131,47 @@ export function createQueryEngine(store: GraphStore) {
         graph,
       };
     },
+    executionContextFromSymbol(
+      locator: SymbolLocator,
+      options?: { maxNodes?: number; maxEdges?: number },
+    ): QueryResult<GraphItem> {
+      const symbol = resolveSymbol(locator);
+
+      if (!symbol) {
+        return {
+          items: [],
+          graph: createGraphEnvelope(),
+        };
+      }
+
+      const graph = store.executionContextFromSymbol(symbol.id, options);
+      return {
+        items: graph.nodes,
+        graph,
+      };
+    },
+    impactFromSymbol(
+      locator: SymbolLocator,
+      options?: { maxNodes?: number; maxEdges?: number },
+    ): QueryResult<GraphItem> {
+      const symbol = resolveSymbol(locator);
+
+      if (!symbol) {
+        return {
+          items: [],
+          graph: createGraphEnvelope(),
+        };
+      }
+
+      const graph = store.impactFromSymbol(symbol.id, options);
+      return {
+        items: graph.nodes,
+        graph,
+      };
+    },
+    explainEdge(edgeId: string) {
+      return store.explainEdge(edgeId);
+    },
     status(workspaceRoot: string, dbPath: string) {
       return {
         workspaceRoot,

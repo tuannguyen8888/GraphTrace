@@ -750,6 +750,32 @@ export class GraphStore {
     });
   }
 
+  executionContextFromSymbol(
+    symbolId: string,
+    options?: { maxNodes?: number; maxEdges?: number },
+  ): GraphEnvelope {
+    return this.traverseSymbolGraph(symbolId, options);
+  }
+
+  impactFromSymbol(
+    symbolId: string,
+    options?: { maxNodes?: number; maxEdges?: number },
+  ): GraphEnvelope {
+    return this.traverseSymbolGraph(symbolId, options);
+  }
+
+  explainEdge(edgeId: string): GraphEdgeDescriptor | null {
+    const row = this.db
+      .prepare("SELECT * FROM edges WHERE id = ?")
+      .get(edgeId) as EdgeRow | undefined;
+
+    if (!row) {
+      return null;
+    }
+
+    return this.mapEdgeRow(row);
+  }
+
   private mapRouteRow(row: RouteRow): RouteItem {
     return {
       id: row.id,
@@ -816,6 +842,107 @@ export class GraphStore {
         : undefined,
       metadata: row.metadata_json ? JSON.parse(row.metadata_json) : undefined,
     };
+  }
+
+  private traverseSymbolGraph(
+    rootId: string,
+    options?: { maxNodes?: number; maxEdges?: number },
+  ): GraphEnvelope {
+    const maxNodes = options?.maxNodes ?? 25;
+    const maxEdges = options?.maxEdges ?? 40;
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM edges WHERE type IN ('routes_to', 'calls', 'queries')",
+      )
+      .all() as EdgeRow[];
+    const outgoing = new Map<string, EdgeRow[]>();
+    const incoming = new Map<string, EdgeRow[]>();
+
+    for (const row of rows) {
+      outgoing.set(row.source_id, [...(outgoing.get(row.source_id) ?? []), row]);
+      incoming.set(row.target_id, [...(incoming.get(row.target_id) ?? []), row]);
+    }
+
+    const nodes = new Map<string, GraphItem>([
+      [rootId, this.graphNodeById(rootId, "symbol")],
+    ]);
+    const edges = new Map<string, GraphEdgeDescriptor>();
+    const confidence: Partial<Record<GraphConfidenceLabel, number>> = {};
+    const truncated = {
+      nodeLimitReached: false,
+      edgeLimitReached: false,
+      omittedNodeCount: 0,
+      omittedEdgeCount: 0,
+    };
+
+    const expand = (
+      adjacency: Map<string, EdgeRow[]>,
+      nextNodeForEdge: (row: EdgeRow) => { id: string; kind: string },
+    ) => {
+      const queue = [rootId];
+      const visited = new Set<string>([rootId]);
+
+      while (queue.length > 0) {
+        const currentId = queue.shift();
+        if (!currentId) {
+          continue;
+        }
+
+        for (const row of adjacency.get(currentId) ?? []) {
+          const nextNode = nextNodeForEdge(row);
+
+          if (!nodes.has(nextNode.id)) {
+            if (nodes.size >= maxNodes) {
+              truncated.nodeLimitReached = true;
+              truncated.omittedNodeCount += 1;
+              continue;
+            }
+
+            nodes.set(nextNode.id, this.graphNodeById(nextNode.id, nextNode.kind));
+          }
+
+          if (!edges.has(row.id)) {
+            if (edges.size >= maxEdges) {
+              truncated.edgeLimitReached = true;
+              truncated.omittedEdgeCount += 1;
+              continue;
+            }
+
+            const edge = this.mapEdgeRow(row);
+            edges.set(edge.id, edge);
+            confidence[edge.confidenceLabel] =
+              (confidence[edge.confidenceLabel] ?? 0) + 1;
+          }
+
+          if (nextNode.kind === "symbol" && !visited.has(nextNode.id)) {
+            visited.add(nextNode.id);
+            queue.push(nextNode.id);
+          }
+        }
+      }
+    };
+
+    expand(incoming, (row) => ({
+      id: row.source_id,
+      kind: row.source_kind,
+    }));
+    expand(outgoing, (row) => ({
+      id: row.target_id,
+      kind: row.target_kind,
+    }));
+
+    return createGraphEnvelope({
+      nodes: [...nodes.values()],
+      edges: [...edges.values()],
+      summary: {
+        rootNodeIds: [rootId],
+        confidence,
+        truncated:
+          truncated.nodeLimitReached || truncated.edgeLimitReached
+            ? truncated
+            : undefined,
+      },
+    });
   }
 
   private graphNodeById(nodeId: string, nodeKindHint?: string): GraphItem {
