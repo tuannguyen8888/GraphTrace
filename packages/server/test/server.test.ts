@@ -17,6 +17,11 @@ import { indexWorkspace } from "@graphtrace/indexer";
 import { createGraphTraceApp } from "../src/index";
 
 const fixtureRoot = join(process.cwd(), "fixtures", "express-prisma-workspace");
+const symbolGraphFixtureRoot = join(
+  process.cwd(),
+  "fixtures",
+  "symbol-graph-workspace",
+);
 const builtWebRoot = join(process.cwd(), "apps", "web", "dist");
 const selfHostRoot = process.cwd();
 
@@ -240,6 +245,33 @@ describe("server", () => {
         nextFixtureRepositoryId,
       );
       expect(fixtureStatusPayload.counts.routeCount).toBeGreaterThan(0);
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("serves symbol search on workspaces with symbol graph indexing enabled", async () => {
+    await ensureWorkspaceInitialized(symbolGraphFixtureRoot);
+    await indexWorkspace({ workspaceRoot: symbolGraphFixtureRoot, full: true });
+
+    const app = createGraphTraceApp({
+      workspaceRoot: symbolGraphFixtureRoot,
+    });
+
+    try {
+      const search = await app.inject({
+        method: "GET",
+        url: "/api/symbols/search?q=audit",
+      });
+      const payload = search.json();
+
+      expect(payload.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "symbol:apps/api/src/services/user-service.ts#withAudit",
+          }),
+        ]),
+      );
     } finally {
       await app.close();
     }

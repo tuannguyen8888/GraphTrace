@@ -61,6 +61,62 @@ export async function createGraphTraceMcpServer(options: {
   );
 
   server.registerTool(
+    "graphtrace_get_execution_context",
+    {
+      description: "Get upstream callers, downstream callees, and sinks for a symbol.",
+      inputSchema: {
+        symbolId: z.string().optional(),
+        filePath: z.string().optional(),
+        symbolName: z.string().optional(),
+        line: z.number().int().positive().optional(),
+        column: z.number().int().positive().optional(),
+        maxNodes: z.number().int().positive().optional(),
+        maxEdges: z.number().int().positive().optional(),
+      },
+    },
+    async ({ maxNodes, maxEdges, ...locator }) =>
+      asToolResult(
+        withQueryEngine((engine) =>
+          engine.executionContextFromSymbol(locator, { maxNodes, maxEdges }),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "graphtrace_get_symbol_impact",
+    {
+      description: "Get an impact-oriented symbol graph with truncation metadata.",
+      inputSchema: {
+        symbolId: z.string().optional(),
+        filePath: z.string().optional(),
+        symbolName: z.string().optional(),
+        line: z.number().int().positive().optional(),
+        column: z.number().int().positive().optional(),
+        maxNodes: z.number().int().positive().optional(),
+        maxEdges: z.number().int().positive().optional(),
+      },
+    },
+    async ({ maxNodes, maxEdges, ...locator }) =>
+      asToolResult(
+        withQueryEngine((engine) =>
+          engine.impactFromSymbol(locator, { maxNodes, maxEdges }),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "graphtrace_explain_edge",
+    {
+      description: "Explain provenance and confidence for a symbol graph edge.",
+      inputSchema: {
+        edgeId: z.string(),
+      },
+    },
+    async ({ edgeId }) =>
+      asToolResult(withQueryEngine((engine) => engine.explainEdge(edgeId))),
+  );
+
+  server.registerTool(
     "search_code",
     {
       description: "Search code, symbols, routes, files, and packages.",
