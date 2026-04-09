@@ -385,4 +385,123 @@ describe("storage", () => {
       store.close();
     }
   });
+
+  test("builds execution-context and impact graphs with truncation and edge explanations", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "graphtrace-storage-"));
+    const store = openGraphStore(
+      join(workspaceRoot, ".graphtrace", "index.db"),
+    );
+
+    try {
+      for (const symbolId of ["symbol:a", "symbol:b", "symbol:c"]) {
+        store.upsertSymbol({
+          id: symbolId,
+          name: symbolId.split(":")[1],
+          displayName: symbolId.split(":")[1],
+          kind: "function",
+          language: "typescript",
+          fileId: `file:${symbolId}.ts`,
+          filePath: `${symbolId}.ts`,
+          exported: true,
+        });
+      }
+
+      store.upsertSymbolEdge({
+        id: "edge:routes_to:GET /users->symbol:a",
+        type: "routes_to",
+        sourceId: "GET /users",
+        sourceKind: "route",
+        targetId: "symbol:a",
+        targetKind: "symbol",
+        confidence: 1,
+        confidenceLabel: "proven",
+        provenance: {
+          kind: "route-handler",
+          source: "framework:express",
+          evidence: ["GET /users"],
+        },
+      });
+      store.upsertSymbolEdge({
+        id: "edge:calls:symbol:a->symbol:b",
+        type: "calls",
+        sourceId: "symbol:a",
+        sourceKind: "symbol",
+        targetId: "symbol:b",
+        targetKind: "symbol",
+        confidence: 1,
+        confidenceLabel: "proven",
+        provenance: {
+          kind: "direct-call",
+          source: "typescript-checker",
+          evidence: ["a.ts:4:2"],
+        },
+      });
+      store.upsertSymbolEdge({
+        id: "edge:calls:symbol:b->symbol:c",
+        type: "calls",
+        sourceId: "symbol:b",
+        sourceKind: "symbol",
+        targetId: "symbol:c",
+        targetKind: "symbol",
+        confidence: 1,
+        confidenceLabel: "proven",
+        provenance: {
+          kind: "direct-call",
+          source: "typescript-checker",
+          evidence: ["b.ts:8:2"],
+        },
+      });
+      store.upsertSymbolEdge({
+        id: "edge:queries:symbol:c->query:c#findMany",
+        type: "queries",
+        sourceId: "symbol:c",
+        sourceKind: "symbol",
+        targetId: "query:c#findMany",
+        targetKind: "query",
+        confidence: 1,
+        confidenceLabel: "proven",
+        provenance: {
+          kind: "query-sink",
+          source: "source-pattern",
+          evidence: ["prisma.user.findMany("],
+        },
+      });
+
+      expect(
+        store.executionContextFromSymbol("symbol:b", {
+          maxNodes: 10,
+          maxEdges: 10,
+        }),
+      ).toMatchObject({
+        nodes: expect.arrayContaining([
+          expect.objectContaining({ id: "GET /users", kind: "route" }),
+          expect.objectContaining({ id: "query:c#findMany", kind: "query" }),
+        ]),
+        edges: expect.arrayContaining([
+          expect.objectContaining({
+            id: "edge:calls:symbol:a->symbol:b",
+          }),
+          expect.objectContaining({
+            id: "edge:calls:symbol:b->symbol:c",
+          }),
+        ]),
+      });
+
+      expect(
+        store.impactFromSymbol("symbol:a", {
+          maxNodes: 2,
+          maxEdges: 1,
+        }).summary.truncated,
+      ).toMatchObject({
+        nodeLimitReached: true,
+      });
+      expect(store.explainEdge("edge:calls:symbol:b->symbol:c")).toMatchObject({
+        provenance: expect.objectContaining({
+          source: "typescript-checker",
+        }),
+      });
+    } finally {
+      store.close();
+    }
+  });
 });
