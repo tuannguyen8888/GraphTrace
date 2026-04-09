@@ -33,6 +33,34 @@ export async function createGraphTraceMcpServer(options: {
     withWorkspaceQueryEngine(options.workspaceRoot, (engine) => action(engine));
 
   server.registerTool(
+    "graphtrace_search_symbols",
+    {
+      description: "Search symbol definitions by name and return a zero-hop graph envelope.",
+      inputSchema: {
+        query: z.string(),
+      },
+    },
+    async ({ query }) =>
+      asToolResult(withQueryEngine((engine) => engine.searchSymbols(query))),
+  );
+
+  server.registerTool(
+    "graphtrace_get_symbol",
+    {
+      description: "Resolve a symbol by id, file plus name, or file plus position.",
+      inputSchema: {
+        symbolId: z.string().optional(),
+        filePath: z.string().optional(),
+        symbolName: z.string().optional(),
+        line: z.number().int().positive().optional(),
+        column: z.number().int().positive().optional(),
+      },
+    },
+    async (locator) =>
+      asToolResult(withQueryEngine((engine) => engine.getSymbol(locator))),
+  );
+
+  server.registerTool(
     "search_code",
     {
       description: "Search code, symbols, routes, files, and packages.",

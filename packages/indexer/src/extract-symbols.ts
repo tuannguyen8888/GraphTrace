@@ -86,6 +86,11 @@ export function extractSymbols(
     }
 
     if (ts.isVariableStatement(node)) {
+      if (!ts.isSourceFile(node.parent)) {
+        ts.forEachChild(node, visitNode);
+        return;
+      }
+
       const exported = hasExportModifier(node);
 
       for (const declaration of node.declarationList.declarations) {
