@@ -265,9 +265,11 @@ function GraphWorkspaceInner(props: GraphWorkspaceProps) {
                 ? "#f6b449"
                 : graphNode?.kind === "package"
                   ? "#82d9a0"
-                  : graphNode?.kind === "route"
-                    ? "#63bbff"
-                    : "#b2bdd1";
+                  : graphNode?.kind === "placeholder"
+                    ? "#f3d27b"
+                    : graphNode?.kind === "route"
+                      ? "#63bbff"
+                      : "#b2bdd1";
             }}
           />
           <Controls showInteractive />
@@ -313,7 +315,9 @@ function GraphCanvasNode(props: NodeProps<GraphFlowNode>) {
   return (
     <div className="graph-node-card">
       <Handle type="target" position={Position.Left} className="graph-handle" />
-      <span className="graph-node-kind">{props.data.item.kind}</span>
+      <span className="graph-node-kind">
+        {props.data.item.actionId ? "action" : props.data.item.kind}
+      </span>
       <span className="graph-node-label">
         {truncateGraphLabel(
           props.data.item.label,
@@ -343,7 +347,7 @@ function createFlowEdges(edges: ArchitectureGraphEdge[]): GraphFlowEdge[] {
     source: edge.sourceId,
     target: edge.targetId,
     animated: edge.kind === "flow",
-    style: buildFlowEdgeStyle(edge.kind),
+    style: buildFlowEdgeStyle(edge.kind, edge.confidenceLabel),
   }));
 }
 
@@ -357,22 +361,32 @@ function buildFlowNodeStyle(
       ? "rgba(99, 187, 255, 0.44)"
       : kind === "package"
         ? "rgba(130, 217, 160, 0.4)"
-        : kind === "symbol"
-          ? "rgba(150, 126, 255, 0.34)"
-        : kind === "query"
-          ? "rgba(255, 129, 102, 0.36)"
-          : "rgba(246, 180, 73, 0.32)";
+        : kind === "placeholder"
+          ? "rgba(243, 210, 123, 0.26)"
+          : kind === "symbol"
+            ? "rgba(150, 126, 255, 0.34)"
+            : kind === "query"
+              ? "rgba(255, 129, 102, 0.36)"
+              : "rgba(246, 180, 73, 0.32)";
 
   return {
     padding: 0,
-    width: isFocus ? 280 : kind === "package" ? 248 : 232,
+    width: isFocus
+      ? 280
+      : kind === "package"
+        ? 248
+        : kind === "placeholder"
+          ? 220
+          : 232,
     minHeight: isFocus ? 112 : kind === "query" ? 94 : 88,
     borderRadius: 24,
     border: isHighlighted
       ? "1.6px solid rgba(255, 255, 255, 0.82)"
       : isFocus
         ? "1.6px solid rgba(246, 180, 73, 0.46)"
-        : "1.2px solid rgba(255, 255, 255, 0.08)",
+        : kind === "placeholder"
+          ? "1.2px dashed rgba(243, 210, 123, 0.46)"
+          : "1.2px solid rgba(255, 255, 255, 0.08)",
     background: `linear-gradient(180deg, ${accentColor}, transparent 55%), rgba(9, 19, 34, 0.96)`,
     color: "#edf2f7",
     boxShadow: isHighlighted
@@ -381,14 +395,36 @@ function buildFlowNodeStyle(
   };
 }
 
-function buildFlowEdgeStyle(kind: ArchitectureGraphEdge["kind"]) {
+function buildFlowEdgeStyle(
+  kind: ArchitectureGraphEdge["kind"],
+  confidenceLabel?: string,
+) {
+  const confidenceStyle =
+    confidenceLabel === "inferred-weak"
+      ? { opacity: 0.5, strokeDasharray: "5 8" }
+      : confidenceLabel === "inferred-strong"
+        ? { opacity: 0.75, strokeDasharray: "9 6" }
+        : {};
+
   switch (kind) {
     case "flow":
-      return { stroke: "rgba(99, 187, 255, 0.86)", strokeWidth: 2.6 };
+      return {
+        stroke: "rgba(99, 187, 255, 0.86)",
+        strokeWidth: 2.6,
+        ...confidenceStyle,
+      };
     case "depends":
-      return { stroke: "rgba(246, 180, 73, 0.82)", strokeWidth: 2.3 };
+      return {
+        stroke: "rgba(246, 180, 73, 0.82)",
+        strokeWidth: 2.3,
+        ...confidenceStyle,
+      };
     case "impacts":
-      return { stroke: "rgba(255, 129, 102, 0.84)", strokeWidth: 2.3 };
+      return {
+        stroke: "rgba(255, 129, 102, 0.84)",
+        strokeWidth: 2.3,
+        ...confidenceStyle,
+      };
     case "contains":
       return {
         stroke: "rgba(151, 205, 142, 0.8)",
@@ -413,6 +449,10 @@ function graphNodeDimensions(isFocus: boolean, kind: string) {
 
   if (kind === "query") {
     return { width: 256, height: 94 };
+  }
+
+  if (kind === "placeholder") {
+    return { width: 220, height: 88 };
   }
 
   return { width: 232, height: 88 };

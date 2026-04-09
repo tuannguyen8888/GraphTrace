@@ -3,10 +3,14 @@ import type { GraphEnvelopeSummary } from "@graphtrace/shared";
 import type { Locale } from "./i18n";
 import { getMessages } from "./i18n";
 import type {
+  SymbolGraphActionId,
   SymbolGraphConfidenceFilter,
   SymbolGraphMode,
 } from "./symbol-graph-types";
-import { buildSymbolConfidenceOptions } from "./symbol-graph-view-model";
+import {
+  buildSymbolConfidenceOptions,
+  buildSymbolGraphControlsState,
+} from "./symbol-graph-view-model";
 
 interface SymbolGraphControlsProps {
   locale: Locale;
@@ -15,6 +19,7 @@ interface SymbolGraphControlsProps {
   confidenceFilter: SymbolGraphConfidenceFilter;
   confidenceSummary?: GraphEnvelopeSummary;
   onConfidenceFilterChange: (filter: SymbolGraphConfidenceFilter) => void;
+  onAction: (actionId: SymbolGraphActionId) => void;
   symbolLabel: string;
 }
 
@@ -26,6 +31,23 @@ export function SymbolGraphControls(props: SymbolGraphControlsProps) {
       strong: messages.app.symbolGraphConfidenceStrong,
       proven: messages.app.symbolGraphConfidenceProven,
       all: messages.app.symbolGraphConfidenceAll,
+    },
+  });
+  const controls = buildSymbolGraphControlsState({
+    graph: props.confidenceSummary
+      ? {
+          nodes: [],
+          edges: [],
+          summary: props.confidenceSummary,
+        }
+      : undefined,
+    mode: props.mode,
+    confidenceFilter: props.confidenceFilter,
+    labels: {
+      showWeakerEdges: messages.app.symbolGraphShowWeakerEdges,
+      expandCallers: messages.app.symbolGraphExpandCallers,
+      expandCallees: messages.app.symbolGraphExpandCallees,
+      openImpact: messages.app.symbolGraphOpenImpact,
     },
   });
 
@@ -76,6 +98,20 @@ export function SymbolGraphControls(props: SymbolGraphControlsProps) {
           ))}
         </div>
       </div>
+      {controls.actions.length > 0 ? (
+        <div className="symbol-graph-action-list">
+          {controls.actions.map((action) => (
+            <button
+              key={action.id}
+              className="ghost-button"
+              type="button"
+              onClick={() => props.onAction(action.id)}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

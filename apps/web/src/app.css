@@ -591,7 +591,8 @@ a {
 }
 
 .symbol-graph-mode-list,
-.symbol-graph-filter-list {
+.symbol-graph-filter-list,
+.symbol-graph-action-list {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -607,6 +608,15 @@ a {
   font-size: 0.82rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+}
+
+.inspector-warning {
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(243, 210, 123, 0.24);
+  background: rgba(243, 210, 123, 0.1);
+  color: #f3d27b;
+  font-size: 0.9rem;
 }
 
 .graph-search-results {
