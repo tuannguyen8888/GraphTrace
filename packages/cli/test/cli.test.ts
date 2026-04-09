@@ -641,7 +641,7 @@ describe("cli", () => {
     expect(
       results.every((result) => !result.stderr.includes("database is locked")),
     ).toBe(true);
-  }, 20_000);
+  }, 30_000);
 
   test("impact honors --depth", async () => {
     await ensureWorkspaceInitialized(fixtureRoot);

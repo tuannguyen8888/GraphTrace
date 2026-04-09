@@ -199,8 +199,13 @@ export function extractSymbols(
 }
 
 function hasExportModifier(node: ts.Node): boolean {
-  return (node.modifiers ?? []).some(
-    (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
+  const modifiers = ts.canHaveModifiers(node)
+    ? ts.getModifiers(node)
+    : undefined;
+  return Boolean(
+    modifiers?.some(
+      (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
+    ),
   );
 }
 

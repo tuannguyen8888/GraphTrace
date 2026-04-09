@@ -365,6 +365,8 @@ const symbolGraph = createGraphEnvelope({
     },
   ],
   summary: {
+    nodeCount: 7,
+    edgeCount: 6,
     rootNodeIds: ["symbol:apps/api/src/services/user-service.ts#listUsers"],
     confidence: {
       proven: 4,
@@ -620,6 +622,7 @@ describe("web ui view-model", () => {
           rootPath: ".",
           label: "tawaco-kiosk",
           kind: "primary",
+          sourceUnitId: "unit:apps/kiosk",
         },
       ],
       selectedRepositoryId: ".",
@@ -784,6 +787,8 @@ describe("web ui view-model", () => {
           },
         ],
         summary: {
+          nodeCount: 2,
+          edgeCount: 1,
           rootNodeIds: ["symbol:apps/web/src/dashboard.tsx#Dashboard"],
           confidence: {
             proven: 1,
