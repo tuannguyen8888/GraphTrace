@@ -27,6 +27,7 @@ function renderToolFiles(
             "[mcp_servers.graphtrace]",
             'command = "graphtrace"',
             'args = ["mcp"]',
+            'cwd = "."',
             "",
           ].join("\n"),
           toolId: tool,

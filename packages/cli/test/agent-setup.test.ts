@@ -87,7 +87,7 @@ describe("agent bootstrap", () => {
     expect(plan.tools.every((tool) => tool.targets.length > 0)).toBe(true);
   });
 
-  test("renders Codex config with a GraphTrace MCP stdio entry", async () => {
+  test("renders Codex config with a GraphTrace MCP stdio entry pinned to the repo cwd", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "graphtrace-agent-"));
     const plan = await planAgentBootstrap({ workspaceRoot });
 
@@ -99,6 +99,7 @@ describe("agent bootstrap", () => {
     expect(codexConfig?.content).toContain("[mcp_servers.graphtrace]");
     expect(codexConfig?.content).toContain('command = "graphtrace"');
     expect(codexConfig?.content).toContain('args = ["mcp"]');
+    expect(codexConfig?.content).toContain('cwd = "."');
   });
 
   test("renders the Codex skill as an operating guide with concrete query sequences", async () => {

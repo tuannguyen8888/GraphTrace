@@ -202,6 +202,7 @@ Lifecycle helpers:
 Why this helps:
 
 - gives agents a shared local MCP entry for `graphtrace mcp`
+- pins the Codex MCP working directory so GraphTrace resolves the repo-local `.graphtrace` data even when the tool launches from outside the workspace root
 - teaches agents when to use GraphTrace tools like `search_code`, `get_dependencies`, `get_impact_analysis`, and `get_status`
 - encourages narrow semantic queries before broad repository scans, which reduces wasted context and token usage
 

@@ -1,5 +1,11 @@
 # @graphtrace/shared
 
+## 1.5.2
+
+### Patch Changes
+
+- Pin the generated Codex MCP server config to the repository working directory so GraphTrace resolves repo-local `.graphtrace` data correctly when tools launch MCP from outside the workspace root.
+
 ## 1.5.1
 
 ## 1.5.0
