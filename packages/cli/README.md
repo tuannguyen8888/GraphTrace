@@ -44,6 +44,17 @@ graphtrace web --port 4310
 graphtrace mcp
 ```
 
+## Help and version
+
+Use the built-in CLI help when you or an AI agent need the current command surface:
+
+```bash
+graphtrace --help
+graphtrace doctor --help
+graphtrace workspace add --help
+graphtrace --version
+```
+
 ## Agent setup
 
 Generate project-local MCP and instruction files for Codex, Claude Code, and Cursor:

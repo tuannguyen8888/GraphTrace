@@ -1,24 +1,9 @@
 import { spawnSync } from "node:child_process";
 import type { Dirent } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
-import {
-  defaultGraphTraceConfig,
-  ensureWorkspaceInitialized,
-  loadGraphTraceConfig,
-} from "@graphtrace/config";
-import { inspectWorkspace } from "@graphtrace/indexer";
-import { createGraphTraceMcpServer } from "@graphtrace/mcp";
-import {
-  runWorkspaceIndex,
-  withWorkspaceQueryEngine,
-} from "@graphtrace/query-engine";
-import {
-  createGraphTraceDaemon,
-  startGraphTraceServer,
-} from "@graphtrace/server";
 import type {
   CliRunOptions,
   CliRunResult,
@@ -46,6 +31,440 @@ const IGNORED_NAMES = new Set([
   ".next",
   "coverage",
 ]);
+const HELP_ALIASES = new Set(["--help", "-h", "help"]);
+const VERSION_ALIASES = new Set(["--version", "-v", "version"]);
+const CLI_PACKAGE_JSON_URL = new URL("../package.json", import.meta.url);
+
+interface CliHelpOption {
+  flags: string;
+  description: string;
+}
+
+interface CliHelpCommand {
+  name: string;
+  heading: string;
+  summary: string;
+  usage: string;
+  options?: CliHelpOption[];
+  examples?: string[];
+  notes?: string[];
+  commands?: CliHelpCommand[];
+}
+
+const CLI_HELP_TREE: CliHelpCommand = {
+  name: "graphtrace",
+  heading: "GraphTrace CLI",
+  summary: "Local-first code graph for JavaScript and TypeScript projects.",
+  usage: "graphtrace <command> [options]",
+  options: [
+    {
+      flags: "-h, --help",
+      description: "Show help for graphtrace or a command",
+    },
+    {
+      flags: "-v, --version",
+      description: "Show the graphtrace CLI version",
+    },
+  ],
+  examples: [
+    "graphtrace doctor --units",
+    "graphtrace index --full --explain",
+    "graphtrace search listUsers --kind symbol",
+    "graphtrace workspace add /absolute/path/to/repo --label my-repo",
+    "graphtrace agent setup --tool codex",
+  ],
+  notes: ["Run 'graphtrace <command> --help' for command-specific help."],
+  commands: [
+    {
+      name: "init",
+      heading: "graphtrace init",
+      summary: "Initialize repo-local GraphTrace state.",
+      usage: "graphtrace init",
+      examples: ["graphtrace init"],
+    },
+    {
+      name: "doctor",
+      heading: "graphtrace doctor",
+      summary:
+        "Inspect local environment details and detected workspace units.",
+      usage: "graphtrace doctor [--units] [--plugins]",
+      options: [
+        {
+          flags: "--units",
+          description: "Print discovered units for the current workspace.",
+        },
+        {
+          flags: "--plugins",
+          description: "Print matched plugins for each discovered unit.",
+        },
+      ],
+      examples: [
+        "graphtrace doctor",
+        "graphtrace doctor --units",
+        "graphtrace doctor --plugins",
+      ],
+    },
+    {
+      name: "index",
+      heading: "graphtrace index",
+      summary: "Build or refresh the workspace graph index.",
+      usage: "graphtrace index [--full] [--json] [--explain]",
+      options: [
+        {
+          flags: "--full",
+          description: "Run a full index instead of an incremental refresh.",
+        },
+        {
+          flags: "--json",
+          description: "Print the index result as JSON.",
+        },
+        {
+          flags: "--explain",
+          description: "Print discovered unit details instead of the summary.",
+        },
+      ],
+      examples: [
+        "graphtrace index --full",
+        "graphtrace index --full --json",
+        "graphtrace index --full --explain",
+      ],
+    },
+    {
+      name: "status",
+      heading: "graphtrace status",
+      summary: "Show current workspace graph and index status.",
+      usage: "graphtrace status [--json]",
+      options: [
+        {
+          flags: "--json",
+          description: "Print the status payload as JSON.",
+        },
+      ],
+      examples: ["graphtrace status", "graphtrace status --json"],
+    },
+    {
+      name: "search",
+      heading: "graphtrace search",
+      summary: "Search symbols, routes, files, and packages.",
+      usage: "graphtrace search <query> [--kind <symbol|route|file|package>]",
+      options: [
+        {
+          flags: "--kind <kind>",
+          description: "Limit results to one search kind.",
+        },
+      ],
+      examples: [
+        "graphtrace search listUsers --kind symbol",
+        "graphtrace search users --kind route",
+      ],
+    },
+    {
+      name: "deps",
+      heading: "graphtrace deps",
+      summary: "Explore dependency edges for a target.",
+      usage:
+        "graphtrace deps <target> [--direction <in|out|both>] [--depth <n>]",
+      options: [
+        {
+          flags: "--direction <dir>",
+          description: "Choose inbound, outbound, or bidirectional traversal.",
+        },
+        {
+          flags: "--depth <n>",
+          description: "Limit traversal depth to a positive integer.",
+        },
+      ],
+      examples: [
+        'graphtrace deps "apps/api/src/routes/users.ts" --direction out --depth 2',
+      ],
+    },
+    {
+      name: "impact",
+      heading: "graphtrace impact",
+      summary: "Show downstream impact for a target.",
+      usage: "graphtrace impact <target> [--depth <n>]",
+      options: [
+        {
+          flags: "--depth <n>",
+          description: "Limit impact traversal depth to a positive integer.",
+        },
+      ],
+      examples: [
+        "graphtrace impact apps/api/src/services/user-service.ts --depth 4",
+      ],
+    },
+    {
+      name: "flow",
+      heading: "graphtrace flow",
+      summary: "Show execution flow for a route or symbol.",
+      usage: "graphtrace flow <target> [--depth <n>]",
+      options: [
+        {
+          flags: "--depth <n>",
+          description: "Limit flow traversal depth to a positive integer.",
+        },
+      ],
+      examples: ['graphtrace flow "GET /users"'],
+    },
+    {
+      name: "routes",
+      heading: "graphtrace routes",
+      summary: "List discovered routes.",
+      usage: "graphtrace routes [--package <name>]",
+      options: [
+        {
+          flags: "--package <name>",
+          description: "Filter routes to a single package name.",
+        },
+      ],
+      examples: [
+        "graphtrace routes",
+        "graphtrace routes --package @fixture/api",
+      ],
+    },
+    {
+      name: "watch",
+      heading: "graphtrace watch",
+      summary: "Watch source files and reindex on changes.",
+      usage: "graphtrace watch [--json] [--debounce-ms <ms>]",
+      options: [
+        {
+          flags: "--json",
+          description: "Emit each watch cycle as JSON.",
+        },
+        {
+          flags: "--debounce-ms <ms>",
+          description: "Set the polling interval in milliseconds.",
+        },
+      ],
+      examples: ["graphtrace watch --json --debounce-ms 250"],
+      notes: ["Runs a full index once on startup and then stays alive."],
+    },
+    {
+      name: "web",
+      heading: "graphtrace web",
+      summary: "Start the repo-local GraphTrace web UI.",
+      usage: "graphtrace web [--port <port>]",
+      options: [
+        {
+          flags: "--port <port>",
+          description: "Choose the local HTTP port. Default: 4310.",
+        },
+      ],
+      examples: ["graphtrace web --port 4310"],
+    },
+    {
+      name: "serve",
+      heading: "graphtrace serve",
+      summary: "Start the multi-workspace GraphTrace daemon and web API.",
+      usage: "graphtrace serve [--port <port>] [--home <path>]",
+      options: [
+        {
+          flags: "--port <port>",
+          description: "Choose the local HTTP port. Default: 4310.",
+        },
+        {
+          flags: "--home <path>",
+          description: "Override the GraphTrace home directory.",
+        },
+      ],
+      examples: ["graphtrace serve --port 4310"],
+    },
+    {
+      name: "workspace",
+      heading: "graphtrace workspace",
+      summary: "Manage registered GraphTrace workspaces.",
+      usage: "graphtrace workspace <subcommand> [options]",
+      commands: [
+        {
+          name: "add",
+          heading: "graphtrace workspace add",
+          summary: "Register a workspace root with the GraphTrace daemon.",
+          usage:
+            "graphtrace workspace add <root-path> [--label <label>] [--json] [--home <path>]",
+          options: [
+            {
+              flags: "--label <label>",
+              description: "Set a display label for the workspace.",
+            },
+            {
+              flags: "--json",
+              description: "Print the created workspace record as JSON.",
+            },
+            {
+              flags: "--home <path>",
+              description: "Override the GraphTrace home directory.",
+            },
+          ],
+          examples: [
+            "graphtrace workspace add /absolute/path/to/repo --label my-repo",
+          ],
+        },
+        {
+          name: "list",
+          heading: "graphtrace workspace list",
+          summary: "List registered workspaces.",
+          usage: "graphtrace workspace list [--json] [--home <path>]",
+          options: [
+            {
+              flags: "--json",
+              description: "Print the workspace list as JSON.",
+            },
+            {
+              flags: "--home <path>",
+              description: "Override the GraphTrace home directory.",
+            },
+          ],
+          examples: ["graphtrace workspace list --json"],
+        },
+        {
+          name: "remove",
+          heading: "graphtrace workspace remove",
+          summary: "Remove a registered workspace.",
+          usage: "graphtrace workspace remove <workspace-id> [--home <path>]",
+          options: [
+            {
+              flags: "--home <path>",
+              description: "Override the GraphTrace home directory.",
+            },
+          ],
+          examples: ["graphtrace workspace remove graphtrace-123abc"],
+        },
+        {
+          name: "reindex",
+          heading: "graphtrace workspace reindex",
+          summary: "Reindex a registered workspace.",
+          usage:
+            "graphtrace workspace reindex <workspace-id> [--json] [--home <path>]",
+          options: [
+            {
+              flags: "--json",
+              description: "Print the reindex result as JSON.",
+            },
+            {
+              flags: "--home <path>",
+              description: "Override the GraphTrace home directory.",
+            },
+          ],
+          examples: ["graphtrace workspace reindex graphtrace-123abc --json"],
+        },
+      ],
+      examples: [
+        "graphtrace workspace add /absolute/path/to/repo --label my-repo",
+        "graphtrace workspace list --json",
+      ],
+      notes: ["Run 'graphtrace workspace <subcommand> --help' for details."],
+    },
+    {
+      name: "agent",
+      heading: "graphtrace agent",
+      summary: "Generate and manage project-local agent integration files.",
+      usage: "graphtrace agent <subcommand> [options]",
+      commands: [
+        {
+          name: "setup",
+          heading: "graphtrace agent setup",
+          summary: "Generate project-local MCP and instruction files.",
+          usage:
+            "graphtrace agent setup [--tool <codex|claude|cursor>] [--dry-run] [--write-mode <tracked|local>]",
+          options: [
+            {
+              flags: "--tool <tool>",
+              description: "Limit setup to one supported tool.",
+            },
+            {
+              flags: "--dry-run",
+              description: "Preview planned changes without writing files.",
+            },
+            {
+              flags: "--write-mode <mode>",
+              description:
+                "Write generated files as tracked or local-only artifacts.",
+            },
+          ],
+          examples: [
+            "graphtrace agent setup",
+            "graphtrace agent setup --dry-run",
+            "graphtrace agent setup --tool codex",
+          ],
+        },
+        {
+          name: "status",
+          heading: "graphtrace agent status",
+          summary: "Inspect configured GraphTrace agent files.",
+          usage:
+            "graphtrace agent status [--tool <codex|claude|cursor>] [--json]",
+          options: [
+            {
+              flags: "--tool <tool>",
+              description: "Limit inspection to one supported tool.",
+            },
+            {
+              flags: "--json",
+              description: "Print status as structured JSON.",
+            },
+          ],
+          examples: [
+            "graphtrace agent status",
+            "graphtrace agent status --json",
+          ],
+        },
+        {
+          name: "restore",
+          heading: "graphtrace agent restore",
+          summary: "Restore the most recent agent setup state.",
+          usage: "graphtrace agent restore [--tool <codex|claude|cursor>]",
+          options: [
+            {
+              flags: "--tool <tool>",
+              description: "Restore only one supported tool.",
+            },
+          ],
+          examples: [
+            "graphtrace agent restore",
+            "graphtrace agent restore --tool codex",
+          ],
+        },
+      ],
+      examples: [
+        "graphtrace agent setup --tool codex",
+        "graphtrace agent status",
+        "graphtrace agent restore",
+      ],
+      notes: ["Run 'graphtrace agent <subcommand> --help' for details."],
+    },
+    {
+      name: "mcp",
+      heading: "graphtrace mcp",
+      summary: "Start the GraphTrace MCP server on stdio.",
+      usage: "graphtrace mcp",
+      examples: ["graphtrace mcp"],
+      notes: ["This command stays alive and serves MCP requests over stdio."],
+    },
+  ],
+};
+
+let cachedCliVersion: string | undefined;
+
+async function loadConfigModule() {
+  return import("@graphtrace/config");
+}
+
+async function loadIndexerModule() {
+  return import("@graphtrace/indexer");
+}
+
+async function loadMcpModule() {
+  return import("@graphtrace/mcp");
+}
+
+async function loadQueryEngineModule() {
+  return import("@graphtrace/query-engine");
+}
+
+async function loadServerModule() {
+  return import("@graphtrace/server");
+}
 
 export async function runCli(
   argv: string[],
@@ -56,8 +475,22 @@ export async function runCli(
   const emitStdout = options.emitStdout ?? (() => undefined);
   const emitStderr = options.emitStderr ?? (() => undefined);
 
+  const helpResult = resolveHelpRequest(argv);
+  if (helpResult) {
+    return helpResult;
+  }
+
+  if (command && VERSION_ALIASES.has(command)) {
+    return {
+      exitCode: 0,
+      stdout: await readCliVersion(),
+      stderr: "",
+    };
+  }
+
   switch (command) {
     case "init": {
+      const { ensureWorkspaceInitialized } = await loadConfigModule();
       const result = await ensureWorkspaceInitialized(cwd);
       return {
         exitCode: 0,
@@ -66,6 +499,9 @@ export async function runCli(
       };
     }
     case "doctor": {
+      const { defaultGraphTraceConfig } = await loadConfigModule();
+      const { inspectWorkspace } = await loadIndexerModule();
+
       if (args.includes("--units")) {
         const inspection = await inspectWorkspace(cwd, defaultGraphTraceConfig);
         return {
@@ -179,11 +615,16 @@ export async function runCli(
           return {
             exitCode: 1,
             stdout: "",
-            stderr: `unknown agent command: ${subcommand ?? "<none>"}`,
+            stderr: formatUnknownCommandError(
+              "agent",
+              subcommand,
+              "graphtrace agent --help",
+            ),
           };
       }
     }
     case "index": {
+      const { runWorkspaceIndex } = await loadQueryEngineModule();
       const asJson = args.includes("--json");
       const explain = args.includes("--explain");
       const result = await runWorkspaceIndex({
@@ -201,6 +642,7 @@ export async function runCli(
       };
     }
     case "status": {
+      const { withWorkspaceQueryEngine } = await loadQueryEngineModule();
       const asJson = args.includes("--json");
       const output = withWorkspaceQueryEngine(cwd, (queryEngine, dbPath) =>
         queryEngine.status(cwd, dbPath),
@@ -217,6 +659,7 @@ export async function runCli(
     case "impact":
     case "flow":
     case "routes": {
+      const { withWorkspaceQueryEngine } = await loadQueryEngineModule();
       const query = args[0] ?? "";
       const output = withWorkspaceQueryEngine(cwd, (queryEngine) =>
         command === "search"
@@ -246,6 +689,7 @@ export async function runCli(
       };
     }
     case "web": {
+      const { startGraphTraceServer } = await loadServerModule();
       const port = readPortOption(args, "--port") ?? 4310;
       const server = await startGraphTraceServer({ workspaceRoot: cwd, port });
       return {
@@ -259,6 +703,8 @@ export async function runCli(
       };
     }
     case "serve": {
+      const { createGraphTraceDaemon, startGraphTraceServer } =
+        await loadServerModule();
       const daemon = createGraphTraceDaemon({
         homeDir: readHomeOption(args),
       });
@@ -276,6 +722,7 @@ export async function runCli(
       };
     }
     case "workspace": {
+      const { createGraphTraceDaemon } = await loadServerModule();
       const [subcommand, ...workspaceArgs] = args;
       const daemon = createGraphTraceDaemon({
         homeDir: readHomeOption(workspaceArgs),
@@ -373,7 +820,11 @@ export async function runCli(
             return {
               exitCode: 1,
               stdout: "",
-              stderr: `unknown workspace command: ${subcommand ?? "<none>"}`,
+              stderr: formatUnknownCommandError(
+                "workspace",
+                subcommand,
+                "graphtrace workspace --help",
+              ),
             };
         }
       } finally {
@@ -381,6 +832,7 @@ export async function runCli(
       }
     }
     case "mcp": {
+      const { createGraphTraceMcpServer } = await loadMcpModule();
       await createGraphTraceMcpServer({ workspaceRoot: cwd });
       return {
         exitCode: 0,
@@ -390,6 +842,7 @@ export async function runCli(
       };
     }
     case "watch": {
+      const { runWorkspaceIndex } = await loadQueryEngineModule();
       const debounceMs = readNumberOption(args, "--debounce-ms") ?? 250;
       const asJson = args.includes("--json");
       const startup = await runWorkspaceIndex({
@@ -510,7 +963,11 @@ export async function runCli(
       return {
         exitCode: 1,
         stdout: "",
-        stderr: `unknown command: ${command ?? "<none>"}`,
+        stderr: formatUnknownCommandError(
+          "command",
+          command,
+          "graphtrace --help",
+        ),
       };
   }
 }
@@ -525,6 +982,122 @@ function formatIndexResult(result: IndexWorkspaceResult): string {
     `symbols:${result.summary.symbolCount}`,
     `routes:${result.summary.routeCount}`,
     `query_edges:${result.summary.queryEdgeCount}`,
+  ].join("\n");
+}
+
+async function readCliVersion(): Promise<string> {
+  if (cachedCliVersion) {
+    return cachedCliVersion;
+  }
+
+  const manifest = JSON.parse(await readFile(CLI_PACKAGE_JSON_URL, "utf8")) as {
+    version?: string;
+  };
+  cachedCliVersion = manifest.version ?? "0.0.0";
+  return cachedCliVersion;
+}
+
+function resolveHelpRequest(argv: string[]): CliRunResult | undefined {
+  if (argv.length === 0) {
+    return undefined;
+  }
+
+  const [command, ...args] = argv;
+  if (command === "help") {
+    return {
+      exitCode: 0,
+      stdout: renderHelp(resolveHelpNode(args)),
+      stderr: "",
+    };
+  }
+
+  const lastArg = argv.at(-1);
+  if (!lastArg || !HELP_ALIASES.has(lastArg)) {
+    return undefined;
+  }
+
+  return {
+    exitCode: 0,
+    stdout: renderHelp(resolveHelpNode(argv.slice(0, -1))),
+    stderr: "",
+  };
+}
+
+function resolveHelpNode(pathTokens: string[]): CliHelpCommand {
+  let node = CLI_HELP_TREE;
+
+  for (const token of pathTokens) {
+    if (token.startsWith("-")) {
+      break;
+    }
+
+    const nextNode = node.commands?.find((command) => command.name === token);
+    if (!nextNode) {
+      break;
+    }
+
+    node = nextNode;
+  }
+
+  return node;
+}
+
+function renderHelp(command: CliHelpCommand): string {
+  const lines = [command.heading];
+
+  if (command.heading === CLI_HELP_TREE.heading) {
+    lines.push("");
+  } else {
+    lines.push(command.summary, "");
+  }
+
+  lines.push("Usage", `  ${command.usage}`);
+
+  if (command.commands && command.commands.length > 0) {
+    lines.push("", "Commands", ...formatHelpRows(command.commands));
+  }
+
+  if (command.options && command.options.length > 0) {
+    lines.push("", "Options", ...formatOptionRows(command.options));
+  }
+
+  if (command.examples && command.examples.length > 0) {
+    lines.push(
+      "",
+      "Examples",
+      ...command.examples.map((example) => `  ${example}`),
+    );
+  }
+
+  if (command.notes && command.notes.length > 0) {
+    lines.push("", "Notes", ...command.notes.map((note) => `  ${note}`));
+  }
+
+  return lines.join("\n");
+}
+
+function formatHelpRows(commands: CliHelpCommand[]): string[] {
+  const width = Math.max(...commands.map((command) => command.name.length), 0);
+  return commands.map(
+    (command) => `  ${command.name.padEnd(width, " ")}  ${command.summary}`,
+  );
+}
+
+function formatOptionRows(options: CliHelpOption[]): string[] {
+  const width = Math.max(...options.map((option) => option.flags.length), 0);
+  return options.map(
+    (option) => `  ${option.flags.padEnd(width, " ")}  ${option.description}`,
+  );
+}
+
+function formatUnknownCommandError(
+  scope: string,
+  value: string | undefined,
+  helpCommand: string,
+): string {
+  return [
+    `unknown ${scope}: ${value ?? "<none>"}`,
+    `Run '${helpCommand}' for usage.`,
   ].join("\n");
 }
 
@@ -597,6 +1170,7 @@ function formatWorkspaceList(workspaces: WorkspaceRecord[]): string {
 async function collectWorkspaceSnapshot(workspaceRoot: string) {
   const snapshot = new Map<string, string>();
   const config = await loadRuntimeConfig(workspaceRoot);
+  const { inspectWorkspace } = await loadIndexerModule();
   const inspection = await inspectWorkspace(workspaceRoot, config);
   const roots = inspection.units
     .filter((unit) => unit.indexingMode === "full")
@@ -612,8 +1186,10 @@ async function collectWorkspaceSnapshot(workspaceRoot: string) {
 
 async function loadRuntimeConfig(workspaceRoot: string) {
   try {
+    const { loadGraphTraceConfig } = await loadConfigModule();
     return await loadGraphTraceConfig(workspaceRoot);
   } catch {
+    const { defaultGraphTraceConfig } = await loadConfigModule();
     return defaultGraphTraceConfig;
   }
 }
