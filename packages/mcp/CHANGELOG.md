@@ -1,5 +1,13 @@
 # @graphtrace/mcp
 
+## 1.5.1
+
+### Patch Changes
+
+- @graphtrace/query-engine@1.5.1
+- @graphtrace/shared@1.5.1
+- @graphtrace/storage@1.5.1
+
 ## 1.5.0
 
 ### Minor Changes
