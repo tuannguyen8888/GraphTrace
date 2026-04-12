@@ -21,6 +21,16 @@ GraphTrace indexes your code into a local SQLite-backed graph, then exposes that
 
 The goal is simple: make code changes safer, repo navigation faster, and AI-assisted development more reliable without shipping source code to a remote service by default.
 
+## What It Looks Like
+
+Workspace overview with graph-first triage, search, and workspace metadata in one local UI:
+
+![GraphTrace workspace overview](./docs/screenshots/workspace-overview-en.png)
+
+Symbol execution graph with callers, callees, inspector context, and quick actions for follow-up analysis:
+
+![GraphTrace symbol execution graph](./docs/screenshots/symbol-execution-graph-en.png)
+
 ## Why Developers Reach For GraphTrace
 
 Use GraphTrace when you need to move quickly in a codebase but still want to know what you are changing.
@@ -28,6 +38,13 @@ Use GraphTrace when you need to move quickly in a codebase but still want to kno
 - Change safety first: run impact analysis, dependency tracing, route discovery, and flow inspection before editing a file that could affect multiple packages or services.
 - Faster understanding in large repos: build a local graph once, then search symbols, routes, files, packages, and unit boundaries without guessing where the architecture lives.
 - Better AI context: expose the same graph through MCP so Codex, Claude Code, and Cursor can ask focused questions about the repo instead of doing broad filesystem scans.
+
+GraphTrace is especially useful when you need fast answers to questions like:
+
+- If I change this function, what else is likely to break?
+- Which files or symbols call this method today?
+- If I patch this screen, service, or package, what should I retest first?
+- How do I give an AI coding agent precise repo context without pasting half the codebase into the prompt?
 
 ## What You Can Use Today
 
@@ -165,6 +182,14 @@ graphtrace deps apps/api/src/routes/users.ts --direction out --depth 2
 graphtrace flow "GET /users"
 ```
 
+Typical workflow before delegating a change to an AI coding agent:
+
+```bash
+graphtrace workspace add /absolute/path/to/repo --label my-repo
+graphtrace serve --port 4310
+graphtrace agent setup --tool codex
+```
+
 ## AI Agent Setup
 
 GraphTrace can generate project-local MCP and instruction files for:
@@ -209,6 +234,37 @@ Why this helps:
 Manual step:
 
 - after files are generated, approve the GraphTrace MCP in Codex, Claude Code, or Cursor if that tool prompts for trust or MCP approval
+
+### Codex Workflow
+
+If you want Codex to proactively use GraphTrace while working inside a repo, installing the npm package is not enough on its own. You also need project-local setup inside that repository.
+
+Recommended sequence:
+
+```bash
+cd /absolute/path/to/repo
+graphtrace workspace add . --label my-repo
+graphtrace agent setup --tool codex
+graphtrace agent status
+```
+
+After setup, Codex gets:
+
+- a repo-local MCP entry that runs `graphtrace mcp`
+- a local GraphTrace skill file that teaches when to prefer semantic graph queries over broad filesystem scans
+- a shared project convention for asking search, dependency, impact, and status questions with less prompt waste
+
+This is the difference between:
+
+- having `graphtrace` installed on your machine
+- having Codex actually know that it should use GraphTrace inside a specific repository
+
+In practice, this makes Codex much better at repository triage questions such as:
+
+- `What calls this function?`
+- `What is the blast radius if we edit this file or symbol?`
+- `What should we retest after touching this route, page, or service?`
+- `Which package owns this path and what else depends on it?`
 
 ## Why Teams Use It
 
