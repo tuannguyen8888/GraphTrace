@@ -83,6 +83,143 @@ describe("cli", () => {
     expect(result.stdout).toContain("pnpm:");
   });
 
+  test("top-level --help prints CLI usage and commands", async () => {
+    const result = await runCli(["--help"], { cwd: process.cwd() });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("GraphTrace CLI");
+    expect(result.stdout).toContain("Usage");
+    expect(result.stdout).toContain("doctor");
+    expect(result.stdout).toContain("agent");
+    expect(result.stdout).toContain("workspace");
+    expect(result.stderr).toBe("");
+  });
+
+  test("top-level --version prints the CLI package version", async () => {
+    const packageJson = JSON.parse(
+      await readFile(
+        join(process.cwd(), "packages", "cli", "package.json"),
+        "utf8",
+      ),
+    ) as { version: string };
+    const result = await runCli(["--version"], { cwd: process.cwd() });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(packageJson.version);
+    expect(result.stderr).toBe("");
+  });
+
+  test("help and version aliases reuse the top-level output", async () => {
+    const helpResult = await runCli(["--help"], { cwd: process.cwd() });
+    const shortHelpResult = await runCli(["-h"], { cwd: process.cwd() });
+    const helpCommandResult = await runCli(["help"], { cwd: process.cwd() });
+    const versionResult = await runCli(["--version"], { cwd: process.cwd() });
+    const shortVersionResult = await runCli(["-v"], { cwd: process.cwd() });
+    const versionCommandResult = await runCli(["version"], {
+      cwd: process.cwd(),
+    });
+
+    expect(shortHelpResult).toMatchObject({
+      exitCode: 0,
+      stdout: helpResult.stdout,
+      stderr: "",
+    });
+    expect(helpCommandResult).toMatchObject({
+      exitCode: 0,
+      stdout: helpResult.stdout,
+      stderr: "",
+    });
+    expect(shortVersionResult).toMatchObject({
+      exitCode: 0,
+      stdout: versionResult.stdout,
+      stderr: "",
+    });
+    expect(versionCommandResult).toMatchObject({
+      exitCode: 0,
+      stdout: versionResult.stdout,
+      stderr: "",
+    });
+  });
+
+  test("agent --help prints contextual help for agent commands", async () => {
+    const result = await runCli(["agent", "--help"], { cwd: process.cwd() });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("graphtrace agent");
+    expect(result.stdout).toContain("agent setup");
+    expect(result.stdout).toContain("agent status");
+    expect(result.stdout).toContain("agent restore");
+    expect(result.stderr).toBe("");
+  });
+
+  test("doctor --help prints contextual help for a leaf command", async () => {
+    const result = await runCli(["doctor", "--help"], { cwd: process.cwd() });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("graphtrace doctor");
+    expect(result.stdout).toContain("--units");
+    expect(result.stdout).toContain("--plugins");
+    expect(result.stderr).toBe("");
+  });
+
+  test("workspace add --help prints contextual help for the add subcommand", async () => {
+    const result = await runCli(["workspace", "add", "--help"], {
+      cwd: process.cwd(),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("graphtrace workspace add");
+    expect(result.stdout).toContain("--label");
+    expect(result.stdout).toContain("<root-path>");
+    expect(result.stderr).toBe("");
+  });
+
+  test("unknown commands point to the relevant help entrypoint", async () => {
+    const topLevelResult = await runCli(["wat"], { cwd: process.cwd() });
+    const agentResult = await runCli(["agent", "wat"], {
+      cwd: process.cwd(),
+    });
+    const workspaceResult = await runCli(["workspace", "wat"], {
+      cwd: process.cwd(),
+    });
+
+    expect(topLevelResult.exitCode).toBe(1);
+    expect(topLevelResult.stderr).toContain(
+      "Run 'graphtrace --help' for usage.",
+    );
+    expect(agentResult.exitCode).toBe(1);
+    expect(agentResult.stderr).toContain(
+      "Run 'graphtrace agent --help' for usage.",
+    );
+    expect(workspaceResult.exitCode).toBe(1);
+    expect(workspaceResult.stderr).toContain(
+      "Run 'graphtrace workspace --help' for usage.",
+    );
+  });
+
+  test("process --help prints top-level CLI help", async () => {
+    const result = await runCliProcess(process.cwd(), ["--help"]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("GraphTrace CLI");
+    expect(result.stdout).toContain("Usage");
+    expect(result.stderr).toBe("");
+  });
+
+  test("process --version prints the CLI package version", async () => {
+    const packageJson = JSON.parse(
+      await readFile(
+        join(process.cwd(), "packages", "cli", "package.json"),
+        "utf8",
+      ),
+    ) as { version: string };
+    const result = await runCliProcess(process.cwd(), ["--version"]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout.trim()).toBe(packageJson.version);
+    expect(result.stderr).toBe("");
+  });
+
   test("agent setup creates project-local files for codex, claude, and cursor", async () => {
     const workspaceRoot = await mkdtemp(
       join(tmpdir(), "graphtrace-cli-agent-"),
