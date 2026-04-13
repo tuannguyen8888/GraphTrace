@@ -1,4 +1,8 @@
-import type { GraphEnvelope, GraphItem } from "@graphtrace/shared";
+import type {
+  GraphConfidenceLabel,
+  GraphEnvelope,
+  GraphItem,
+} from "@graphtrace/shared";
 
 export type SymbolGraphMode = "execution" | "impact" | "reference";
 export type SymbolGraphConfidenceFilter = "strong" | "proven" | "all";
@@ -22,8 +26,17 @@ export interface SymbolGraphData {
 export interface SymbolGraphInspectorSection {
   id: "callers" | "callees" | "routes" | "sinks";
   items: GraphItem[];
+  rows: SymbolInspectorRow[];
   title: string;
   warning?: string;
+}
+
+export interface SymbolInspectorRow {
+  item: GraphItem;
+  confidenceLabel?: GraphConfidenceLabel;
+  relationshipKind: "caller" | "callee" | "route" | "sink";
+  evidenceSummary: string;
+  evidenceLines: string[];
 }
 
 export interface SymbolGraphConfidenceOption {

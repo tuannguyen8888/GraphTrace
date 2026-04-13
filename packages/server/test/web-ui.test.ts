@@ -36,6 +36,7 @@ import {
   filterSearchResultsForDisplay,
   matchesScope,
 } from "../../../apps/web/src/view-model";
+import { buildWorkspacePresentationState } from "../../../apps/web/src/workspace-focus-view-model";
 
 const packages: PackageSummary[] = [
   {
@@ -311,6 +312,11 @@ const symbolGraph = createGraphEnvelope({
       targetKind: "symbol",
       confidence: 0.85,
       confidenceLabel: "inferred-strong",
+      provenance: {
+        kind: "route-handler",
+        source: "fastify",
+        evidence: ["apps/api/src/routes/users.ts:12 -> auditedListUsers"],
+      },
     },
     {
       id: "edge:references:withAudit->listUsers",
@@ -321,6 +327,11 @@ const symbolGraph = createGraphEnvelope({
       targetKind: "symbol",
       confidence: 1,
       confidenceLabel: "proven",
+      provenance: {
+        kind: "symbol-reference",
+        source: "typescript-checker",
+        evidence: ["withAudit references listUsers directly"],
+      },
     },
     {
       id: "edge:calls:legacyWrapper->listUsers",
@@ -331,6 +342,11 @@ const symbolGraph = createGraphEnvelope({
       targetKind: "symbol",
       confidence: 0.45,
       confidenceLabel: "inferred-weak",
+      provenance: {
+        kind: "heuristic-call",
+        source: "fallback-control-flow",
+        evidence: ["legacyWrapper may call listUsers through wrapper logic"],
+      },
     },
     {
       id: "edge:references:listUsers->prisma",
@@ -341,6 +357,11 @@ const symbolGraph = createGraphEnvelope({
       targetKind: "symbol",
       confidence: 1,
       confidenceLabel: "proven",
+      provenance: {
+        kind: "symbol-reference",
+        source: "typescript-checker",
+        evidence: ["listUsers reads prisma client from module scope"],
+      },
     },
     {
       id: "edge:routes_to:GET /users->listUsers",
@@ -351,6 +372,11 @@ const symbolGraph = createGraphEnvelope({
       targetKind: "symbol",
       confidence: 1,
       confidenceLabel: "proven",
+      provenance: {
+        kind: "route-handler",
+        source: "express",
+        evidence: ["GET /users is handled by listUsers"],
+      },
     },
     {
       id: "edge:queries:listUsers->findMany",
@@ -362,6 +388,11 @@ const symbolGraph = createGraphEnvelope({
       targetKind: "query",
       confidence: 1,
       confidenceLabel: "proven",
+      provenance: {
+        kind: "query-call",
+        source: "prisma",
+        evidence: ["prisma.user.findMany("],
+      },
     },
   ],
   summary: {
@@ -664,6 +695,7 @@ describe("web ui view-model", () => {
     expect(messages.app.symbolGraphCallees).toBe("Callees");
     expect(messages.app.symbolGraphRoutes).toBe("Routes");
     expect(messages.app.symbolGraphSinks).toBe("Sinks");
+    expect(messages.app.symbolGraphConfidenceWeak).toBe("Weak");
   });
 
   test("builds symbol inspector sections for reference mode from proven reference edges only", () => {
@@ -755,6 +787,55 @@ describe("web ui view-model", () => {
       "expand-callees",
       "open-impact",
     ]);
+  });
+
+  test("builds trust-aware inspector rows with confidence labels and provenance summaries", () => {
+    const sections = buildSymbolInspectorSections({
+      graph: symbolGraph,
+      rootSymbolId: "symbol:apps/api/src/services/user-service.ts#listUsers",
+      mode: "execution",
+      confidenceFilter: "all",
+      weakConfidenceWarning: "Contains weak-confidence edges.",
+      labels: {
+        callers: "Callers",
+        callees: "Callees",
+        routes: "Routes",
+        sinks: "Sinks",
+      },
+    });
+
+    expect(sections[0]?.rows[0]).toMatchObject({
+      item: expect.objectContaining({
+        id: "symbol:apps/api/src/routes/users.ts#auditedListUsers",
+      }),
+      confidenceLabel: "inferred-strong",
+      evidenceSummary: "route-handler via fastify",
+      evidenceLines: ["apps/api/src/routes/users.ts:12 -> auditedListUsers"],
+      relationshipKind: "caller",
+    });
+    expect(sections[0]?.rows[1]).toMatchObject({
+      item: expect.objectContaining({
+        id: "symbol:apps/api/src/routes/users.ts#legacyWrapper",
+      }),
+      confidenceLabel: "inferred-weak",
+      evidenceSummary: "heuristic-call via fallback-control-flow",
+    });
+    expect(sections[2]?.rows[0]).toMatchObject({
+      item: expect.objectContaining({
+        id: "GET /users",
+      }),
+      confidenceLabel: "proven",
+      evidenceSummary: "route-handler via express",
+      relationshipKind: "route",
+    });
+    expect(sections[3]?.rows[0]).toMatchObject({
+      item: expect.objectContaining({
+        id: "query:apps/api/src/services/user-service.ts#prisma.user.findMany(",
+      }),
+      confidenceLabel: "proven",
+      evidenceSummary: "query-call via prisma",
+      relationshipKind: "sink",
+    });
   });
 
   test("keeps compact callback investigations focused without extra expansion actions", () => {
@@ -940,5 +1021,45 @@ describe("web ui view-model", () => {
         locale: "vi",
       }),
     ).toBe("/?lang=vi");
+  });
+
+  test("builds workspace presentation state for the default overview shell", () => {
+    expect(
+      buildWorkspacePresentationState({
+        inspector: { type: "idle" },
+      }),
+    ).toMatchObject({
+      mode: "overview",
+      emphasizeGraph: false,
+      emphasizeInspector: false,
+      showStarterGuide: true,
+      supportingPanelsVariant: "full",
+      mobileSectionOrder: ["graph", "supporting", "inspector"],
+      graphCanvasDensity: "default",
+    });
+  });
+
+  test("builds workspace presentation state for a focused symbol investigation", () => {
+    expect(
+      buildWorkspacePresentationState({
+        inspector: {
+          type: "search",
+          item: {
+            id: "symbol:apps/kiosk/src/pages/Result.tsx#Result.handlePrint",
+            kind: "symbol",
+            label: "Result.handlePrint",
+            path: "apps/kiosk/src/pages/Result.tsx",
+          },
+        },
+      }),
+    ).toMatchObject({
+      mode: "focused-symbol",
+      emphasizeGraph: true,
+      emphasizeInspector: true,
+      showStarterGuide: false,
+      supportingPanelsVariant: "secondary",
+      mobileSectionOrder: ["graph", "inspector", "supporting"],
+      graphCanvasDensity: "expanded",
+    });
   });
 });

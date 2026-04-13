@@ -1,7 +1,12 @@
 {
   "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
   "files": {
-    "ignore": ["**/dist/**", "**/.graphtrace/**"]
+    "ignore": [
+      "**/dist/**",
+      "**/.graphtrace/**",
+      "**/playwright-report/**",
+      "**/test-results/**"
+    ]
   },
   "formatter": {
     "enabled": true,

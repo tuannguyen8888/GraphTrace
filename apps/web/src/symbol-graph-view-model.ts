@@ -18,6 +18,11 @@ import type {
   SymbolGraphInspectorSection,
   SymbolGraphMode,
 } from "./symbol-graph-types";
+import {
+  buildSymbolInspectorSection,
+  collectSymbolInspectorSection,
+  emptyInspectorSectionResult,
+} from "./symbol-inspector-view-model";
 
 export function buildSymbolGraphModel(
   input: SymbolGraphData,
@@ -72,69 +77,68 @@ export function buildSymbolInspectorSections(input: {
     return [];
   }
 
-  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
-  const callers = collectSection(
+  const callers = collectSymbolInspectorSection({
     graph,
-    (edge) =>
+    predicate: (edge) =>
       edge.targetId === input.rootSymbolId &&
       edge.type === edgeTypeForIncomingSection(input.mode),
-    (edge) => edge.sourceId,
-    nodeById,
-  );
-  const callees = collectSection(
+    getNodeId: (edge) => edge.sourceId,
+    relationshipKind: "caller",
+  });
+  const callees = collectSymbolInspectorSection({
     graph,
-    (edge) =>
+    predicate: (edge) =>
       edge.sourceId === input.rootSymbolId &&
       edge.type === edgeTypeForOutgoingSection(input.mode),
-    (edge) => edge.targetId,
-    nodeById,
-  );
+    getNodeId: (edge) => edge.targetId,
+    relationshipKind: "callee",
+  });
   const routes =
     input.mode === "reference"
-      ? emptySectionResult()
-      : collectSection(
+      ? emptyInspectorSectionResult()
+      : collectSymbolInspectorSection({
           graph,
-          (edge) =>
+          predicate: (edge) =>
             edge.targetId === input.rootSymbolId && edge.type === "routes_to",
-          (edge) => edge.sourceId,
-          nodeById,
-        );
+          getNodeId: (edge) => edge.sourceId,
+          relationshipKind: "route",
+        });
   const sinks =
     input.mode === "reference"
-      ? emptySectionResult()
-      : collectSection(
+      ? emptyInspectorSectionResult()
+      : collectSymbolInspectorSection({
           graph,
-          (edge) =>
+          predicate: (edge) =>
             edge.sourceId === input.rootSymbolId && edge.type === "queries",
-          (edge) => edge.targetId,
-          nodeById,
-        );
+          getNodeId: (edge) => edge.targetId,
+          relationshipKind: "sink",
+        });
 
   return [
-    buildInspectorSection(
-      "callers",
-      input.labels.callers,
-      callers,
-      input.weakConfidenceWarning,
-    ),
-    buildInspectorSection(
-      "callees",
-      input.labels.callees,
-      callees,
-      input.weakConfidenceWarning,
-    ),
-    buildInspectorSection(
-      "routes",
-      input.labels.routes,
-      routes,
-      input.weakConfidenceWarning,
-    ),
-    buildInspectorSection(
-      "sinks",
-      input.labels.sinks,
-      sinks,
-      input.weakConfidenceWarning,
-    ),
+    buildSymbolInspectorSection({
+      id: "callers",
+      title: input.labels.callers,
+      section: callers,
+      weakConfidenceWarning: input.weakConfidenceWarning,
+    }),
+    buildSymbolInspectorSection({
+      id: "callees",
+      title: input.labels.callees,
+      section: callees,
+      weakConfidenceWarning: input.weakConfidenceWarning,
+    }),
+    buildSymbolInspectorSection({
+      id: "routes",
+      title: input.labels.routes,
+      section: routes,
+      weakConfidenceWarning: input.weakConfidenceWarning,
+    }),
+    buildSymbolInspectorSection({
+      id: "sinks",
+      title: input.labels.sinks,
+      section: sinks,
+      weakConfidenceWarning: input.weakConfidenceWarning,
+    }),
   ];
 }
 
@@ -209,61 +213,6 @@ export function buildSymbolGraphControlsState(input: {
 
   return {
     actions,
-  };
-}
-
-function collectSection(
-  graph: GraphEnvelope,
-  predicate: (edge: GraphEnvelope["edges"][number]) => boolean,
-  getNodeId: (edge: GraphEnvelope["edges"][number]) => string,
-  nodeById: Map<string, GraphItem>,
-) {
-  const seenIds = new Set<string>();
-  let hasWeakEdges = false;
-  const items: GraphItem[] = [];
-
-  for (const edge of graph.edges) {
-    if (!predicate(edge)) {
-      continue;
-    }
-
-    if (edge.confidenceLabel === "inferred-weak") {
-      hasWeakEdges = true;
-    }
-
-    const node = nodeById.get(getNodeId(edge));
-    if (!node || seenIds.has(node.id)) {
-      continue;
-    }
-
-    seenIds.add(node.id);
-    items.push(node);
-  }
-
-  return {
-    items,
-    hasWeakEdges,
-  };
-}
-
-function buildInspectorSection(
-  id: SymbolGraphInspectorSection["id"],
-  title: string,
-  section: ReturnType<typeof collectSection>,
-  weakConfidenceWarning?: string,
-): SymbolGraphInspectorSection {
-  return {
-    id,
-    title,
-    items: section.items,
-    warning: section.hasWeakEdges ? weakConfidenceWarning : undefined,
-  };
-}
-
-function emptySectionResult() {
-  return {
-    items: [],
-    hasWeakEdges: false,
   };
 }
 

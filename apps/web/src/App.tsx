@@ -29,7 +29,6 @@ import {
   buildArchitectureGraph,
   layoutArchitectureGraph,
 } from "./architecture-graph";
-import { GraphWorkspace } from "./graph-workspace";
 import {
   type WorkspaceHomeSummary,
   buildWorkspaceCards,
@@ -38,15 +37,11 @@ import {
   DEFAULT_LOCALE,
   LOCALE_STORAGE_KEY,
   type Locale,
-  SUPPORTED_LOCALES,
   formatLocaleDateTime,
   getMessages,
   resolveLocale,
 } from "./i18n";
 import { buildRouteHref, parseRouteState } from "./route-state";
-import { StarterGuide } from "./starter-guide";
-import { SymbolGraphControls } from "./symbol-graph-controls";
-import { SymbolGraphInspector } from "./symbol-graph-inspector";
 import type {
   SymbolGraphActionId,
   SymbolGraphConfidenceFilter,
@@ -77,12 +72,12 @@ import {
   looksLikeSourcePath,
   matchesScope,
 } from "./view-model";
+import {
+  type WorkspaceInspectorState,
+  buildWorkspacePresentationState,
+} from "./workspace-focus-view-model";
 import { WorkspaceHome } from "./workspace-home";
-
-type InspectorMode =
-  | { type: "idle" }
-  | { type: "route"; route: RouteSummary }
-  | { type: "search"; item: SearchResult };
+import { WorkspaceScreen } from "./workspace-screen";
 
 const DEFAULT_SYMBOL_GRAPH_LIMITS = {
   maxNodes: 18,
@@ -115,7 +110,9 @@ export function App() {
     readSearchKindFromLocation(),
   );
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
-  const [inspector, setInspector] = useState<InspectorMode>({ type: "idle" });
+  const [inspector, setInspector] = useState<WorkspaceInspectorState>({
+    type: "idle",
+  });
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
   const [actionFeedback, setActionFeedback] = useState("");
@@ -285,6 +282,11 @@ export function App() {
           weakConfidenceWarning: messages.app.symbolGraphWeakWarning,
         })
       : [];
+  const presentationState = buildWorkspacePresentationState({ inspector });
+  const sidebarPackageEntries = packageEntries.map((entry) => ({
+    ...entry,
+    scopeLabel: formatScopeLabel(locale, entry.scope),
+  }));
 
   useEffect(() => {
     let cancelled = false;
@@ -697,6 +699,146 @@ export function App() {
     }
   };
 
+  const resetSymbolGraphView = () => {
+    setSymbolGraphMode("execution");
+    setSymbolConfidenceFilter("strong");
+    setSymbolGraphLimits(DEFAULT_SYMBOL_GRAPH_LIMITS);
+  };
+
+  const handleOpenWorkspaceList = () => {
+    startTransition(() => {
+      setSelectedWorkspaceId("");
+    });
+  };
+
+  const handleOpenWorkspace = (workspaceId: string) => {
+    startTransition(() => {
+      setSelectedWorkspaceId(workspaceId);
+      setSelectedRepositoryId(".");
+      setSelectedPackageId("");
+      setSearchText("");
+      setSearchResults([]);
+      setInspector({ type: "idle" });
+      resetSymbolGraphView();
+      setRouteFlow([]);
+      setDependencyItems([]);
+      setImpactItems([]);
+      setSymbolGraphResult(null);
+    });
+  };
+
+  const handleRepositoryChange = (nextRepositoryId: string) => {
+    startTransition(() => {
+      setSelectedRepositoryId(nextRepositoryId);
+      setSelectedPackageId("");
+      setInspector({ type: "idle" });
+      resetSymbolGraphView();
+      setRouteFlow([]);
+      setDependencyItems([]);
+      setImpactItems([]);
+      setSymbolGraphResult(null);
+      setSearchResults([]);
+    });
+  };
+
+  const handleSelectGraphNode = (node: {
+    id: string;
+    kind: string;
+    label: string;
+    path?: string;
+    actionId?: string;
+  }) => {
+    if (node.actionId) {
+      handleSymbolGraphAction(node.actionId as SymbolGraphActionId);
+      return;
+    }
+
+    if (node.kind === "symbol") {
+      resetSymbolGraphView();
+    }
+
+    inspectGraphItem(
+      {
+        id: node.id,
+        kind: node.kind,
+        label: node.label,
+        path: node.path,
+      },
+      packages,
+      routes,
+      setInspector,
+      setSelectedPackageId,
+      setSearchKind,
+      setSearchText,
+    );
+  };
+
+  const handleRunStarterAction = (action: WorkspaceStarterAction) => {
+    runStarterAction(
+      action,
+      packages,
+      routes,
+      setInspector,
+      setSelectedPackageId,
+      setSearchKind,
+      setSearchText,
+    );
+  };
+
+  const handleSelectSearchResult = (item: SearchResult) => {
+    if (item.kind === "symbol") {
+      resetSymbolGraphView();
+    }
+
+    inspectSearchResult(item, routes, setInspector);
+  };
+
+  const handleSelectRoute = (route: RouteSummary) => {
+    setInspector({
+      type: "route",
+      route,
+    });
+  };
+
+  const handleSelectInspectorItem = (item: GraphItem) => {
+    inspectGraphItem(
+      item,
+      packages,
+      routes,
+      setInspector,
+      setSelectedPackageId,
+      setSearchKind,
+      setSearchText,
+    );
+  };
+
+  const handleSelectSymbolInspectorItem = (item: GraphItem) => {
+    if (item.kind === "symbol") {
+      resetSymbolGraphView();
+    }
+
+    handleSelectInspectorItem(item);
+  };
+
+  const handleRerunSearch = () => {
+    if (inspector.type === "idle") {
+      return;
+    }
+
+    runSearchFromItem(
+      inspector.type === "route"
+        ? {
+            id: inspector.route.id,
+            kind: "route",
+            label: inspector.route.id,
+            path: inspector.route.filePath,
+          }
+        : inspector.item,
+      setSearchKind,
+      setSearchText,
+    );
+  };
+
   if (!selectedWorkspaceId) {
     return (
       <WorkspaceHome
@@ -710,20 +852,7 @@ export function App() {
         onDraftRootPathChange={setDraftRootPath}
         onDraftLabelChange={setDraftLabel}
         onAddWorkspace={handleAddWorkspace}
-        onOpenWorkspace={(workspaceId) => {
-          startTransition(() => {
-            setSelectedWorkspaceId(workspaceId);
-            setSelectedRepositoryId(".");
-            setSelectedPackageId("");
-            setSearchText("");
-            setSearchResults([]);
-            setInspector({ type: "idle" });
-            setSymbolGraphMode("execution");
-            setSymbolConfidenceFilter("strong");
-            setSymbolGraphLimits(DEFAULT_SYMBOL_GRAPH_LIMITS);
-            setSymbolGraphResult(null);
-          });
-        }}
+        onOpenWorkspace={handleOpenWorkspace}
       />
     );
   }
@@ -734,921 +863,127 @@ export function App() {
     label: entry.label,
     path: entry.path,
   }));
+  const selectedSearchResultId =
+    inspector.type === "search" ? inspector.item.id : "";
+  const selectedRouteId = inspector.type === "route" ? inspector.route.id : "";
 
   return (
-    <main className="app-shell">
-      <section className="app-frame">
-        <header className="command-deck">
-          <div className="command-copy">
-            {selectedWorkspace ? (
-              <div className="workspace-breadcrumb">
-                <button
-                  className="ghost-button"
-                  type="button"
-                  onClick={() => {
-                    startTransition(() => {
-                      setSelectedWorkspaceId("");
-                    });
-                  }}
-                >
-                  {messages.app.workspaceListLabel}
-                </button>
-                <span>/</span>
-                <strong>{selectedWorkspace.label}</strong>
-              </div>
-            ) : null}
-            <span className="eyebrow">{messages.app.eyebrow}</span>
-            <h1>GraphTrace</h1>
-            <p>{messages.app.intro}</p>
-          </div>
-
-          <div className="command-actions">
-            <button
-              className="ghost-button"
-              type="button"
-              onClick={() => {
-                startTransition(() => {
-                  setSelectedWorkspaceId("");
-                });
-              }}
-            >
-              {messages.app.backToWorkspaces}
-            </button>
-            <label className="field repo-picker">
-              <span>{messages.localeLabel}</span>
-              <select
-                value={locale}
-                onChange={(event) =>
-                  setLocale(resolveLocale(event.target.value, locale))
-                }
-              >
-                {SUPPORTED_LOCALES.map((entry) => (
-                  <option key={entry} value={entry}>
-                    {messages.localeNames[entry]}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field repo-picker">
-              <span>{messages.app.repositoryScope}</span>
-              <select
-                value={selectedRepositoryId}
-                onChange={(event) => {
-                  const nextRepositoryId = event.target.value;
-                  startTransition(() => {
-                    setSelectedRepositoryId(nextRepositoryId);
-                    setSelectedPackageId("");
-                    setInspector({ type: "idle" });
-                    setSymbolGraphMode("execution");
-                    setSymbolConfidenceFilter("strong");
-                    setSymbolGraphLimits(DEFAULT_SYMBOL_GRAPH_LIMITS);
-                    setRouteFlow([]);
-                    setDependencyItems([]);
-                    setImpactItems([]);
-                    setSymbolGraphResult(null);
-                    setSearchResults([]);
-                  });
-                }}
-              >
-                {repositories.map((entry) => (
-                  <option key={entry.id} value={entry.id}>
-                    {entry.kind === "primary"
-                      ? `${entry.label} · ${entry.rootPath}`
-                      : `${entry.label} · ${entry.rootPath}`}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              className="refresh-button"
-              type="button"
-              onClick={() => {
-                startTransition(() => {
-                  setRefreshNonce((value) => value + 1);
-                });
-              }}
-            >
-              {messages.app.refreshGraph}
-            </button>
-            <div className="status-note">
-              <span>{messages.app.workspaceLabel}</span>
-              <strong>
-                {selectedWorkspace?.label ?? messages.common.loading}
-              </strong>
-            </div>
-            <div className="status-note">
-              <span>{messages.app.lastIndexLabel}</span>
-              <strong>
-                {formatTimestamp(locale, status?.lastIndexRun?.completedAt)}
-              </strong>
-            </div>
-          </div>
-        </header>
-
-        {workspaceError ? (
-          <section className="error-banner">{workspaceError}</section>
-        ) : null}
-
-        <section className="workspace-grid">
-          <aside className="panel rail-panel">
-            <div className="panel-heading">
-              <span className="panel-kicker">
-                {messages.app.workspaceStatusKicker}
-              </span>
-              <h2>{messages.app.graphStateTitle}</h2>
-            </div>
-
-            <dl className="metric-grid">
-              <Metric
-                label={messages.app.packagesLabel}
-                value={status?.counts.packageCount ?? 0}
-              />
-              <Metric
-                label={messages.app.filesLabel}
-                value={status?.counts.fileCount ?? 0}
-              />
-              <Metric
-                label={messages.app.symbolsLabel}
-                value={status?.counts.symbolCount ?? 0}
-              />
-              <Metric
-                label={messages.app.routesLabel}
-                value={status?.counts.routeCount ?? 0}
-              />
-              <Metric
-                label={messages.app.queryEdgesLabel}
-                value={status?.counts.queryEdgeCount ?? 0}
-              />
-            </dl>
-
-            <div className="meta-block">
-              <span>{messages.app.repositoryLabel}</span>
-              <strong>
-                {selectedRepository?.label ?? messages.common.loading}
-              </strong>
-            </div>
-            <div className="meta-block">
-              <span>{messages.app.repositoryRootLabel}</span>
-              <strong>
-                {selectedRepository?.rootPath ?? messages.common.loading}
-              </strong>
-            </div>
-            <div className="meta-block">
-              <span>{messages.app.workspaceRootLabel}</span>
-              <strong>
-                {status?.workspaceRoot ?? messages.common.loading}
-              </strong>
-            </div>
-            <div className="meta-block">
-              <span>{messages.app.dbPathLabel}</span>
-              <strong>{status?.dbPath ?? messages.common.loading}</strong>
-            </div>
-            <div className="meta-block">
-              <span>{messages.app.modeLabel}</span>
-              <strong>
-                {status?.lastIndexRun?.mode ?? messages.common.noneYet}
-              </strong>
-            </div>
-
-            <div className="panel-divider" />
-
-            <div className="panel-heading compact">
-              <span className="panel-kicker">
-                {messages.app.workspaceScopeKicker}
-              </span>
-              <h2>{messages.app.triageLensTitle}</h2>
-            </div>
-
-            <div className="scope-toggle">
-              {scopeOptions.map((option) => (
-                <button
-                  key={option.id}
-                  className={
-                    scopeMode === option.id
-                      ? "scope-option is-active"
-                      : "scope-option"
-                  }
-                  type="button"
-                  onClick={() => setScopeMode(option.id)}
-                >
-                  <strong>{option.label}</strong>
-                  <span>{option.description}</span>
-                </button>
-              ))}
-            </div>
-
-            <div className="panel-divider" />
-
-            <div className="panel-heading compact">
-              <span className="panel-kicker">
-                {messages.app.packagesKicker}
-              </span>
-              <h2>{messages.app.routeFilterTitle}</h2>
-            </div>
-
-            <label className="field">
-              <span>{messages.app.filterByPackageLabel}</span>
-              <select
-                value={selectedPackageId}
-                onChange={(event) => setSelectedPackageId(event.target.value)}
-              >
-                <option value="">{messages.app.allVisiblePackages}</option>
-                {packageEntries.map((entry) => (
-                  <option key={entry.id} value={entry.id}>
-                    {entry.label}
-                    {entry.disambiguation ? ` · ${entry.secondaryLabel}` : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <ul className="stack-list package-list">
-              {packageEntries.map((entry) => (
-                <li key={entry.id}>
-                  <button
-                    className={
-                      entry.id === selectedPackageId
-                        ? "list-item is-active"
-                        : "list-item"
-                    }
-                    type="button"
-                    onClick={() =>
-                      setSelectedPackageId((current) =>
-                        current === entry.id ? "" : entry.id,
-                      )
-                    }
-                  >
-                    <span className="list-chip">
-                      {formatScopeLabel(locale, entry.scope)}
-                    </span>
-                    <span className="list-title">{entry.label}</span>
-                    <span className="list-meta">{entry.secondaryLabel}</span>
-                    {entry.disambiguation ? (
-                      <span className="list-subtle">
-                        {messages.app.duplicateLabelHint}
-                      </span>
-                    ) : null}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </aside>
-
-          <section className="workspace-main">
-            <article className="panel graph-panel">
-              <div className="panel-heading">
-                <span className="panel-kicker">
-                  {messages.app.architectureGraphKicker}
-                </span>
-                <h2>{messages.app.boundedRelationshipTitle}</h2>
-                <p>{messages.app.architectureGraphDescription}</p>
-              </div>
-
-              {isSymbolInspector ? null : (
-                <div className="graph-toolbar">
-                  {(
-                    [
-                      ["flow", messages.app.graphEdgeFlow],
-                      ["depends", messages.app.graphEdgeDepends],
-                      ["impacts", messages.app.graphEdgeImpacts],
-                      ["contains", messages.app.graphEdgeContains],
-                    ] as const
-                  ).map(([key, label]) => (
-                    <button
-                      key={key}
-                      className={
-                        edgeFilters[key]
-                          ? "graph-filter is-active"
-                          : "graph-filter"
-                      }
-                      type="button"
-                      onClick={() =>
-                        setEdgeFilters((current) => ({
-                          ...current,
-                          [key]: !current[key],
-                        }))
-                      }
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              <GraphWorkspace
-                locale={locale}
-                graph={activeGraph}
-                nodes={positionedGraphNodes}
-                starterGuide={starterGuide}
-                toolbarExtras={
-                  isSymbolInspector && inspector.type === "search" ? (
-                    <SymbolGraphControls
-                      locale={locale}
-                      mode={symbolGraphMode}
-                      confidenceFilter={symbolConfidenceFilter}
-                      confidenceSummary={symbolGraphResult?.graph?.summary}
-                      symbolLabel={inspector.item.label}
-                      onModeChange={setSymbolGraphMode}
-                      onConfidenceFilterChange={setSymbolConfidenceFilter}
-                      onAction={handleSymbolGraphAction}
-                    />
-                  ) : undefined
-                }
-                onSelectNode={(node) => {
-                  if (node.actionId) {
-                    handleSymbolGraphAction(
-                      node.actionId as SymbolGraphActionId,
-                    );
-                    return;
-                  }
-                  if (node.kind === "symbol") {
-                    setSymbolGraphMode("execution");
-                    setSymbolConfidenceFilter("strong");
-                    setSymbolGraphLimits(DEFAULT_SYMBOL_GRAPH_LIMITS);
-                  }
-                  inspectGraphItem(
-                    {
-                      id: node.id,
-                      kind: node.kind,
-                      label: node.label,
-                      path: node.path,
-                    },
-                    packages,
-                    routes,
-                    setInspector,
-                    setSelectedPackageId,
-                    setSearchKind,
-                    setSearchText,
-                  );
-                }}
-                onRunStarterAction={(action) =>
-                  runStarterAction(
-                    action,
-                    packages,
-                    routes,
-                    setInspector,
-                    setSelectedPackageId,
-                    setSearchKind,
-                    setSearchText,
-                  )
-                }
-              />
-            </article>
-
-            <article className="panel">
-              <div className="panel-heading">
-                <span className="panel-kicker">
-                  {messages.app.searchResultsKicker}
-                </span>
-                <h2>{messages.app.workbenchTitle}</h2>
-                <p>{messages.app.workbenchDescription}</p>
-              </div>
-
-              <div className="control-row">
-                <label className="field grow">
-                  <span>{messages.app.queryLabel}</span>
-                  <input
-                    value={searchText}
-                    onChange={(event) => setSearchText(event.target.value)}
-                    placeholder="runCli, packages/server, /api/impact..."
-                  />
-                </label>
-                <label className="field">
-                  <span>{messages.app.kindLabel}</span>
-                  <select
-                    value={searchKind}
-                    onChange={(event) => setSearchKind(event.target.value)}
-                  >
-                    <option value="symbol">symbol</option>
-                    <option value="route">route</option>
-                    <option value="file">file</option>
-                    <option value="package">package</option>
-                  </select>
-                </label>
-              </div>
-
-              <section className="search-guidance">
-                <div className="search-guidance-card">
-                  <span className="panel-kicker">
-                    {messages.app.guidedTriageKicker}
-                  </span>
-                  <h3>{searchWorkbench.emptyStateTitle}</h3>
-                  <p>{searchWorkbench.emptyStateBody}</p>
-                </div>
-
-                <div className="search-kind-guide">
-                  <strong>{searchKind}</strong>
-                  <span>{searchWorkbench.kindGuide}</span>
-                </div>
-
-                <div className="quick-pick-grid">
-                  {searchWorkbench.quickPicks.map((pick) => (
-                    <button
-                      key={pick.id}
-                      className="quick-pick"
-                      type="button"
-                      onClick={() => {
-                        startTransition(() => {
-                          setSearchKind(pick.kind);
-                          setSearchText(pick.query);
-                        });
-                      }}
-                    >
-                      <span className="list-chip">{pick.kind}</span>
-                      <span className="list-title">{pick.label}</span>
-                      <span className="list-meta">{pick.query}</span>
-                      <span className="list-subtle">{pick.reason}</span>
-                    </button>
-                  ))}
-                </div>
-
-                <ol className="triage-steps">
-                  {searchWorkbench.triageSteps.map((step) => (
-                    <li key={step}>{step}</li>
-                  ))}
-                </ol>
-              </section>
-
-              <ul className="stack-list results-list">
-                {visibleSearchResults.length === 0 ? (
-                  <li className="empty-state">
-                    {searchText.trim()
-                      ? messages.app.noSearchMatches({
-                          searchKind,
-                          searchText,
-                        })
-                      : messages.app.idleSearchPrompt}
-                  </li>
-                ) : (
-                  visibleSearchResults.map((item) => {
-                    const owningPackage = findOwningPackage(
-                      item.path,
-                      packages,
-                    );
-                    return (
-                      <li key={`${item.kind}:${item.id}`}>
-                        <button
-                          className={
-                            inspector.type === "search" &&
-                            inspector.item.id === item.id
-                              ? "list-item is-active"
-                              : "list-item"
-                          }
-                          type="button"
-                          onClick={() => {
-                            if (item.kind === "symbol") {
-                              setSymbolGraphMode("execution");
-                              setSymbolConfidenceFilter("strong");
-                              setSymbolGraphLimits(DEFAULT_SYMBOL_GRAPH_LIMITS);
-                            }
-                            inspectSearchResult(item, routes, setInspector);
-                          }}
-                        >
-                          <span className="list-chip">{item.kind}</span>
-                          <span className="list-title">{item.label}</span>
-                          <span className="list-meta">
-                            {item.path ?? `score ${item.score ?? 0}`}
-                          </span>
-                          {owningPackage?.label ? (
-                            <span className="list-subtle">
-                              {owningPackage.label} · {owningPackage.path}
-                            </span>
-                          ) : null}
-                        </button>
-                      </li>
-                    );
-                  })
-                )}
-              </ul>
-            </article>
-
-            <article className="panel">
-              <div className="panel-heading">
-                <span className="panel-kicker">
-                  {messages.app.routeExplorerKicker}
-                </span>
-                <h2>{messages.app.httpSurfaceTitle}</h2>
-                <p>{messages.app.routeExplorerDescription}</p>
-              </div>
-
-              <ul className="stack-list results-list">
-                {visibleRoutes.length === 0 ? (
-                  <li className="empty-state">
-                    {messages.app.noRoutesInScope}
-                  </li>
-                ) : (
-                  visibleRoutes.map((route) => {
-                    const owningPackage = findOwningPackage(
-                      route.filePath,
-                      packages,
-                    );
-                    return (
-                      <li key={route.id}>
-                        <button
-                          className={
-                            inspector.type === "route" &&
-                            inspector.route.id === route.id
-                              ? "list-item is-active route-item"
-                              : "list-item route-item"
-                          }
-                          type="button"
-                          onClick={() => {
-                            setInspector({
-                              type: "route",
-                              route,
-                            });
-                          }}
-                        >
-                          <span className="route-line">
-                            <span className="method-chip">{route.method}</span>
-                            <span className="route-path">{route.path}</span>
-                          </span>
-                          <span className="route-meta-line">
-                            <span>{route.framework}</span>
-                            <span>
-                              {formatConfidence(locale, route.confidence)}
-                            </span>
-                            <span>
-                              {owningPackage?.label ??
-                                messages.app.unmappedPackage}
-                            </span>
-                          </span>
-                          <span className="list-meta">{route.filePath}</span>
-                        </button>
-                      </li>
-                    );
-                  })
-                )}
-              </ul>
-            </article>
-          </section>
-
-          <aside className="panel inspector-panel">
-            <div className="panel-heading">
-              <span className="panel-kicker">
-                {messages.app.detailPaneKicker}
-              </span>
-              <h2>{messages.app.inspectorTitle}</h2>
-              <p>{messages.app.inspectorDescription}</p>
-            </div>
-
-            {inspector.type === "idle" ? (
-              <div className="inspector-empty">
-                <StarterGuide
-                  locale={locale}
-                  guide={starterGuide}
-                  onRunAction={(action) =>
-                    runStarterAction(
-                      action,
-                      packages,
-                      routes,
-                      setInspector,
-                      setSelectedPackageId,
-                      setSearchKind,
-                      setSearchText,
-                    )
-                  }
-                />
-                <div className="empty-state">{messages.app.inspectorEmpty}</div>
-              </div>
-            ) : (
-              <>
-                <div className="inspector-card">
-                  <span className="list-chip">
-                    {inspector.type === "route" ? "route" : inspector.item.kind}
-                  </span>
-                  <h3>{selectedTitle}</h3>
-                  <p>{selectedSummary}</p>
-                  {selectedPackage ? (
-                    <p className="inspector-supporting">
-                      {selectedPackage.label} · {selectedPackage.path}
-                    </p>
-                  ) : null}
-
-                  <div className="action-row">
-                    <button
-                      className="ghost-button"
-                      type="button"
-                      disabled={!selectedPath}
-                      onClick={() => {
-                        if (selectedPath) {
-                          void copyToClipboard(
-                            selectedPath,
-                            messages.app.copiedPath,
-                            setActionFeedback,
-                            locale,
-                          );
-                        }
-                      }}
-                    >
-                      {messages.common.copyPath}
-                    </button>
-                    <button
-                      className="ghost-button"
-                      type="button"
-                      disabled={!selectedCommand}
-                      onClick={() => {
-                        if (selectedCommand) {
-                          void copyToClipboard(
-                            selectedCommand,
-                            messages.app.copiedCommand,
-                            setActionFeedback,
-                            locale,
-                          );
-                        }
-                      }}
-                    >
-                      {messages.common.copyCommand}
-                    </button>
-                    <button
-                      className="ghost-button"
-                      type="button"
-                      onClick={() => {
-                        runSearchFromItem(
-                          inspector.type === "route"
-                            ? {
-                                id: inspector.route.id,
-                                kind: "route",
-                                label: inspector.route.id,
-                                path: inspector.route.filePath,
-                              }
-                            : inspector.item,
-                          setSearchKind,
-                          setSearchText,
-                        );
-                      }}
-                    >
-                      {messages.app.rerunSearch}
-                    </button>
-                    {selectedFileHref ? (
-                      <a
-                        className="ghost-button is-link"
-                        href={selectedFileHref}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        {messages.common.openFile}
-                      </a>
-                    ) : null}
-                  </div>
-
-                  {actionFeedback ? (
-                    <p className="action-feedback">{actionFeedback}</p>
-                  ) : null}
-                </div>
-
-                {detailLoading ? (
-                  <div className="empty-state inspector-empty">
-                    {messages.app.inspectorLoading}
-                  </div>
-                ) : null}
-                {detailError ? (
-                  <div className="error-banner">{detailError}</div>
-                ) : null}
-
-                {isSymbolInspector ? (
-                  <SymbolGraphInspector
-                    locale={locale}
-                    sections={symbolInspectorSections}
-                    onSelectItem={(item) => {
-                      if (item.kind === "symbol") {
-                        setSymbolGraphMode("execution");
-                        setSymbolConfidenceFilter("strong");
-                        setSymbolGraphLimits(DEFAULT_SYMBOL_GRAPH_LIMITS);
-                      }
-                      inspectGraphItem(
-                        item,
-                        packages,
-                        routes,
-                        setInspector,
-                        setSelectedPackageId,
-                        setSearchKind,
-                        setSearchText,
-                      );
-                    }}
-                  />
-                ) : inspector.type === "route" ? (
-                  <>
-                    <InspectorSection
-                      locale={locale}
-                      title={messages.app.routeFlowTitle}
-                      subtitle={messages.app.routeFlowSubtitle}
-                      items={visibleRouteFlow}
-                      workspaceRoot={status?.workspaceRoot}
-                      onSelectItem={(item) =>
-                        inspectGraphItem(
-                          item,
-                          packages,
-                          routes,
-                          setInspector,
-                          setSelectedPackageId,
-                          setSearchKind,
-                          setSearchText,
-                        )
-                      }
-                      onFeedback={setActionFeedback}
-                    />
-                    <InspectorSection
-                      locale={locale}
-                      title={messages.app.relatedPackagesTitle}
-                      subtitle={messages.app.relatedPackagesSubtitle}
-                      items={relatedPackageItems}
-                      workspaceRoot={status?.workspaceRoot}
-                      onSelectItem={(item) =>
-                        inspectGraphItem(
-                          item,
-                          packages,
-                          routes,
-                          setInspector,
-                          setSelectedPackageId,
-                          setSearchKind,
-                          setSearchText,
-                        )
-                      }
-                      onFeedback={setActionFeedback}
-                    />
-                    <InspectorSection
-                      locale={locale}
-                      title={messages.app.queryHintsTitle}
-                      subtitle={messages.app.queryHintsSubtitle}
-                      items={routeInsights.queryHints}
-                      workspaceRoot={status?.workspaceRoot}
-                      onSelectItem={(item) =>
-                        inspectGraphItem(
-                          item,
-                          packages,
-                          routes,
-                          setInspector,
-                          setSelectedPackageId,
-                          setSearchKind,
-                          setSearchText,
-                        )
-                      }
-                      onFeedback={setActionFeedback}
-                    />
-                  </>
-                ) : (
-                  <>
-                    <InspectorSection
-                      locale={locale}
-                      title={messages.app.dependenciesTitle}
-                      subtitle={messages.app.dependenciesSubtitle}
-                      items={visibleDependencyItems}
-                      workspaceRoot={status?.workspaceRoot}
-                      onSelectItem={(item) =>
-                        inspectGraphItem(
-                          item,
-                          packages,
-                          routes,
-                          setInspector,
-                          setSelectedPackageId,
-                          setSearchKind,
-                          setSearchText,
-                        )
-                      }
-                      onFeedback={setActionFeedback}
-                    />
-                    <InspectorSection
-                      locale={locale}
-                      title={messages.app.impactTitle}
-                      subtitle={messages.app.impactSubtitle}
-                      items={visibleImpactItems}
-                      workspaceRoot={status?.workspaceRoot}
-                      onSelectItem={(item) =>
-                        inspectGraphItem(
-                          item,
-                          packages,
-                          routes,
-                          setInspector,
-                          setSelectedPackageId,
-                          setSearchKind,
-                          setSearchText,
-                        )
-                      }
-                      onFeedback={setActionFeedback}
-                    />
-                  </>
-                )}
-              </>
-            )}
-          </aside>
-        </section>
-      </section>
-    </main>
-  );
-}
-
-function Metric(props: { label: string; value: number }) {
-  return (
-    <div className="metric-card">
-      <dt>{props.label}</dt>
-      <dd>{props.value}</dd>
-    </div>
-  );
-}
-
-function InspectorSection(props: {
-  locale: Locale;
-  title: string;
-  subtitle: string;
-  items: GraphItem[];
-  workspaceRoot?: string;
-  onSelectItem: (item: GraphItem) => void;
-  onFeedback: (message: string) => void;
-}) {
-  const messages = getMessages(props.locale);
-
-  return (
-    <section className="inspector-section">
-      <div className="inspector-section-heading">
-        <h3>{props.title}</h3>
-        <p>{props.subtitle}</p>
-      </div>
-
-      <ul className="stack-list inspector-list">
-        {props.items.length === 0 ? (
-          <li className="empty-state">{messages.app.noItemsInTrace}</li>
-        ) : (
-          props.items.map((item) => {
-            const itemCommand = buildGraphTraceCommand(item);
-            const itemFileHref =
-              props.workspaceRoot && item.path
-                ? `file://${encodeURI(joinPath(props.workspaceRoot, item.path))}`
-                : "";
-
-            return (
-              <li key={item.id} className="inspector-row">
-                <button
-                  className="inspector-row-main"
-                  type="button"
-                  onClick={() => props.onSelectItem(item)}
-                >
-                  <span className="list-chip">{item.kind}</span>
-                  <span className="list-title">{item.label}</span>
-                  <span className="list-meta">
-                    {item.path ?? item.id}
-                    {typeof item.confidence === "number"
-                      ? ` · ${formatConfidence(props.locale, item.confidence)}`
-                      : ""}
-                  </span>
-                </button>
-
-                <div className="inspector-row-actions">
-                  <button
-                    className="mini-action"
-                    type="button"
-                    disabled={!item.path}
-                    onClick={() => {
-                      if (item.path) {
-                        void copyToClipboard(
-                          item.path,
-                          messages.app.copiedPath,
-                          props.onFeedback,
-                          props.locale,
-                        );
-                      }
-                    }}
-                  >
-                    {messages.common.copyPath}
-                  </button>
-                  <button
-                    className="mini-action"
-                    type="button"
-                    onClick={() => {
-                      void copyToClipboard(
-                        itemCommand,
-                        messages.app.copiedCommand,
-                        props.onFeedback,
-                        props.locale,
-                      );
-                    }}
-                  >
-                    {messages.common.copyCommand}
-                  </button>
-                  {itemFileHref ? (
-                    <a
-                      className="mini-action is-link"
-                      href={itemFileHref}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      {messages.common.openFile}
-                    </a>
-                  ) : null}
-                </div>
-              </li>
-            );
-          })
-        )}
-      </ul>
-    </section>
+    <WorkspaceScreen
+      locale={locale}
+      workspaceError={workspaceError}
+      presentationState={presentationState}
+      header={{
+        selectedWorkspace,
+        repositories,
+        selectedRepositoryId,
+        onOpenWorkspaceList: handleOpenWorkspaceList,
+        onLocaleChange: setLocale,
+        onRepositoryChange: handleRepositoryChange,
+        onRefreshGraph: () => {
+          startTransition(() => {
+            setRefreshNonce((value) => value + 1);
+          });
+        },
+        currentWorkspaceLabel:
+          selectedWorkspace?.label ?? messages.common.loading,
+        lastIndexLabel: formatTimestamp(
+          locale,
+          status?.lastIndexRun?.completedAt,
+        ),
+      }}
+      sidebar={{
+        status,
+        selectedRepository,
+        scopeOptions,
+        scopeMode,
+        onScopeModeChange: setScopeMode,
+        selectedPackageId,
+        onSelectPackage: setSelectedPackageId,
+        onTogglePackage: (packageId) =>
+          setSelectedPackageId((current) =>
+            current === packageId ? "" : packageId,
+          ),
+        packageEntries: sidebarPackageEntries,
+      }}
+      graphPanel={{
+        isSymbolInspector,
+        edgeFilters,
+        onToggleEdgeFilter: (key) =>
+          setEdgeFilters((current) => ({
+            ...current,
+            [key]: !current[key],
+          })),
+        graph: activeGraph,
+        nodes: positionedGraphNodes,
+        starterGuide,
+        onSelectNode: handleSelectGraphNode,
+        onRunStarterAction: handleRunStarterAction,
+        symbolControls:
+          isSymbolInspector && inspector.type === "search"
+            ? {
+                mode: symbolGraphMode,
+                confidenceFilter: symbolConfidenceFilter,
+                confidenceSummary: symbolGraphResult?.graph?.summary,
+                symbolLabel: inspector.item.label,
+                onModeChange: setSymbolGraphMode,
+                onConfidenceFilterChange: setSymbolConfidenceFilter,
+                onAction: handleSymbolGraphAction,
+              }
+            : undefined,
+      }}
+      supportingPanels={{
+        variant: presentationState.supportingPanelsVariant,
+        searchText,
+        onSearchTextChange: setSearchText,
+        searchKind,
+        onSearchKindChange: setSearchKind,
+        searchWorkbench,
+        visibleSearchResults,
+        selectedSearchResultId,
+        onSelectQuickPick: (pick) => {
+          startTransition(() => {
+            setSearchKind(pick.kind);
+            setSearchText(pick.query);
+          });
+        },
+        onSelectSearchResult: handleSelectSearchResult,
+        packages,
+        visibleRoutes,
+        selectedRouteId,
+        onSelectRoute: handleSelectRoute,
+      }}
+      inspectorPanel={{
+        inspector,
+        selectedTitle,
+        selectedSummary,
+        selectedPackage,
+        selectedPath,
+        selectedCommand,
+        selectedFileHref,
+        actionFeedback,
+        onActionFeedbackChange: setActionFeedback,
+        onRerunSearch: handleRerunSearch,
+        detailLoading,
+        detailError,
+        isSymbolInspector,
+        symbolInspectorSections,
+        onSelectSymbolInspectorItem: handleSelectSymbolInspectorItem,
+        routeFlowItems: visibleRouteFlow,
+        relatedPackageItems,
+        queryHintItems: routeInsights.queryHints,
+        dependencyItems: visibleDependencyItems,
+        impactItems: visibleImpactItems,
+        workspaceRoot: status?.workspaceRoot,
+        onSelectItem: handleSelectInspectorItem,
+      }}
+    />
   );
 }
 
 function inspectSearchResult(
   item: SearchResult,
   routes: RouteSummary[],
-  setInspector: (value: InspectorMode) => void,
+  setInspector: (value: WorkspaceInspectorState) => void,
 ) {
   if (item.kind === "route") {
     const matchingRoute = routes.find((route) => route.id === item.id) ?? null;
@@ -1671,7 +1006,7 @@ function inspectGraphItem(
   item: GraphItem,
   packages: PackageSummary[],
   routes: RouteSummary[],
-  setInspector: (value: InspectorMode) => void,
+  setInspector: (value: WorkspaceInspectorState) => void,
   setSelectedPackageId: (value: string | ((current: string) => string)) => void,
   setSearchKind: (value: string) => void,
   setSearchText: (value: string) => void,
@@ -1723,7 +1058,7 @@ function runStarterAction(
   action: WorkspaceStarterAction,
   packages: PackageSummary[],
   routes: RouteSummary[],
-  setInspector: (value: InspectorMode) => void,
+  setInspector: (value: WorkspaceInspectorState) => void,
   setSelectedPackageId: (value: string | ((current: string) => string)) => void,
   setSearchKind: (value: string) => void,
   setSearchText: (value: string) => void,
@@ -1778,20 +1113,6 @@ function runStarterAction(
     setSearchKind(action.kind);
     setSearchText(action.query);
   });
-}
-
-async function copyToClipboard(
-  value: string,
-  message: string,
-  setFeedback: (message: string) => void,
-  locale: Locale = DEFAULT_LOCALE,
-) {
-  try {
-    await navigator.clipboard.writeText(value);
-    setFeedback(message);
-  } catch {
-    setFeedback(getMessages(locale).app.clipboardUnavailable);
-  }
 }
 
 function runSearchFromItem(
