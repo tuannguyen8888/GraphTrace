@@ -1,5 +1,11 @@
 # graphtrace
 
+## 1.6.1
+
+### Patch Changes
+
+- 9e7f886: Improve the graph-first workspace workflow by promoting the focused graph and inspector state above supporting panels, surfacing trust-aware symbol inspector evidence, and tightening desktop/mobile triage flow coverage.
+
 ## 1.6.0
 
 ### Minor Changes
