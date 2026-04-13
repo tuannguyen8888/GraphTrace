@@ -1,5 +1,13 @@
 # @graphtrace/indexer
 
+## 1.6.0
+
+### Patch Changes
+
+- @graphtrace/config@1.6.0
+- @graphtrace/shared@1.6.0
+- @graphtrace/storage@1.6.0
+
 ## 1.5.2
 
 ### Patch Changes
