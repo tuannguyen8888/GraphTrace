@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@graphtrace/query-engine": "workspace:*",
+    "@graphtrace/server": "workspace:*",
     "@graphtrace/shared": "workspace:*",
     "@graphtrace/storage": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",

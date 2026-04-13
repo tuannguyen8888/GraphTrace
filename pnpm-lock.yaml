@@ -117,6 +117,9 @@ importers:
       '@graphtrace/query-engine':
         specifier: workspace:*
         version: link:../query-engine
+      '@graphtrace/server':
+        specifier: workspace:*
+        version: link:../server
       '@graphtrace/shared':
         specifier: workspace:*
         version: link:../shared

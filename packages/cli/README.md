@@ -42,6 +42,7 @@ graphtrace search listUsers --kind symbol
 graphtrace routes
 graphtrace web --port 4310
 graphtrace mcp
+graphtrace workspace add /absolute/path/to/repo --label my-repo
 ```
 
 ## Help and version
@@ -57,7 +58,7 @@ graphtrace --version
 
 ## Agent setup
 
-Generate project-local MCP and instruction files for Codex, Claude Code, and Cursor:
+Generate project or user-scoped MCP and instruction files for Codex, Claude Code, and Cursor:
 
 ```bash
 graphtrace agent setup
@@ -69,23 +70,39 @@ Useful options:
 - `graphtrace agent setup --tool codex`
 - `graphtrace agent setup --tool claude`
 - `graphtrace agent setup --tool cursor`
+- `graphtrace agent setup --scope user`
+- `graphtrace agent setup --scope user --home ~/.graphtrace-dev`
 
 Lifecycle helpers:
 
 - `graphtrace agent status`
 - `graphtrace agent status --json`
+- `graphtrace agent status --scope user`
 - `graphtrace agent restore`
 - `graphtrace agent restore --tool codex`
+- `graphtrace agent restore --scope user`
 
-Generated files:
+Project scope generated files:
 
 - Codex: `.codex/config.toml`, `.agents/skills/graphtrace/SKILL.md`
 - Claude Code: `.mcp.json`, `.claude/CLAUDE.md`
 - Cursor: `.cursor/mcp.json`, `.cursor/rules/graphtrace.mdc`
 
+User scope generated files:
+
+- Codex: `~/.codex/config.toml`, `~/.codex/skills/graphtrace/SKILL.md`
+- Claude Code: `~/.claude.json`, `~/.claude/CLAUDE.md`
+- Cursor: `~/.cursor/mcp.json`
+
+The generated Codex MCP config no longer pins `cwd` to the repository root. One GraphTrace MCP entry can serve any workspace registered through `graphtrace workspace add`.
+
+If multiple workspaces are indexed and a request is ambiguous, ask GraphTrace for `list_workspaces` first and retry with `workspaceId`.
+
 If the target tool asks for MCP approval or trust confirmation, approve GraphTrace there after the files are generated.
 
-`graphtrace agent restore` uses the latest setup state stored in `.graphtrace/agent/setup-state.json` plus any backups under `.graphtrace/backups/agent-setup/`.
+`graphtrace agent restore` uses the latest setup state stored in `<repo>/.graphtrace/agent/setup-state.json` for project scope or `<graphtrace-home>/.graphtrace/agent/setup-state.json` for `--scope user`, plus backups under the matching `.graphtrace/backups/agent-setup/` directory.
+
+`graphtrace agent setup --write-mode local` is available only for project scope, because user-scoped files are machine-level config rather than repo artifacts.
 
 ## Notes
 

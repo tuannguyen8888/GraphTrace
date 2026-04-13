@@ -1,3 +1,5 @@
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -6,6 +8,7 @@ import { describe, expect, test } from "vitest";
 
 import { ensureWorkspaceInitialized } from "@graphtrace/config";
 import { indexWorkspace } from "@graphtrace/indexer";
+import { createGraphTraceDaemon } from "@graphtrace/server";
 
 const repoRoot = process.cwd();
 const fixtureRoot = join(repoRoot, "fixtures", "express-prisma-workspace");
@@ -21,11 +24,21 @@ interface ToolGraphItem {
   kind?: string;
   label?: string;
   path?: string;
+  filePath?: string;
   method?: string;
 }
 
 function readToolItems(payload: unknown): ToolGraphItem[] {
   return (payload as { items?: ToolGraphItem[] } | undefined)?.items ?? [];
+}
+
+function readToolText(payload: unknown): string {
+  return (payload as { content?: Array<{ text?: string }> } | undefined)
+    ?.content?.[0]?.text
+    ? String(
+        (payload as { content?: Array<{ text?: string }> }).content?.[0]?.text,
+      )
+    : "";
 }
 
 describe("mcp", () => {
@@ -61,6 +74,7 @@ describe("mcp", () => {
       const tools = await client.listTools();
 
       expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
+        "add_workspace",
         "get_data_flow",
         "get_dependencies",
         "get_impact_analysis",
@@ -74,6 +88,9 @@ describe("mcp", () => {
         "graphtrace_get_symbol_impact",
         "graphtrace_search_symbols",
         "list_packages",
+        "list_workspaces",
+        "reindex_workspace",
+        "remove_workspace",
         "run_index",
         "search_code",
       ]);
@@ -236,6 +253,107 @@ describe("mcp", () => {
       await transport.close().catch(() => undefined);
     }
   }, 20_000);
+
+  test("serves multiple registered workspaces from one MCP home and resolves workspace scope explicitly", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "graphtrace-mcp-home-"));
+    const daemon = createGraphTraceDaemon({ homeDir });
+
+    try {
+      const graphtrace = await daemon.addWorkspace(repoRoot, {
+        label: "GraphTrace",
+      });
+      const fixture = await daemon.addWorkspace(fixtureRoot, {
+        label: "fixture",
+      });
+
+      const transport = new StdioClientTransport({
+        command: "pnpm",
+        args: [
+          "exec",
+          "node",
+          "--import",
+          "tsx",
+          cliEntry,
+          "mcp",
+          "--home",
+          homeDir,
+        ],
+        cwd: repoRoot,
+        stderr: "pipe",
+      });
+      const client = new Client(
+        {
+          name: "graphtrace-multi-workspace-client",
+          version: "1.0.0",
+        },
+        {
+          capabilities: {},
+        },
+      );
+
+      try {
+        await client.connect(transport);
+
+        const workspaces = await client.callTool({
+          name: "list_workspaces",
+          arguments: {},
+        });
+        const graphtraceSearch = await client.callTool({
+          name: "search_code",
+          arguments: {
+            query: "runCli",
+            workspaceId: graphtrace.id,
+          },
+        });
+        const autoResolvedSymbol = await client.callTool({
+          name: "graphtrace_get_symbol",
+          arguments: {
+            filePath: "packages/server/src/index.ts",
+            symbolName: "registerSingleWorkspaceRoutes",
+          },
+        });
+        const ambiguousRoutes = await client.callTool({
+          name: "get_routes",
+          arguments: {},
+        });
+
+        const workspaceItems = readToolItems(workspaces.structuredContent);
+        const graphtraceItems = readToolItems(
+          graphtraceSearch.structuredContent,
+        );
+        const autoResolvedItems = readToolItems(
+          autoResolvedSymbol.structuredContent,
+        );
+        const ambiguousText = readToolText(ambiguousRoutes);
+
+        expect(workspaces.isError).not.toBe(true);
+        expect(workspaceItems).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ id: graphtrace.id, label: "GraphTrace" }),
+            expect.objectContaining({ id: fixture.id, label: "fixture" }),
+          ]),
+        );
+        expect(graphtraceSearch.isError).not.toBe(true);
+        expect(
+          graphtraceItems.some((item) => item.id?.includes("runCli")),
+        ).toBe(true);
+        expect(autoResolvedSymbol.isError).not.toBe(true);
+        expect(
+          autoResolvedItems.some(
+            (item) =>
+              item.id?.includes("registerSingleWorkspaceRoutes") &&
+              item.filePath?.includes("packages/server/src/index.ts"),
+          ),
+        ).toBe(true);
+        expect(ambiguousRoutes.isError).toBe(true);
+        expect(ambiguousText).toContain("workspaceId");
+      } finally {
+        await transport.close().catch(() => undefined);
+      }
+    } finally {
+      daemon.close();
+    }
+  }, 30_000);
 
   test("exposes symbol search and lookup tools", async () => {
     await ensureWorkspaceInitialized(symbolGraphFixtureRoot);
