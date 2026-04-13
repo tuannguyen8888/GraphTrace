@@ -8,6 +8,8 @@ const MANAGED_BLOCK_END = "<!-- graphtrace:managed:end -->";
 const AGENT_SETUP_STATE_PATH = join(".graphtrace", "agent", "setup-state.json");
 
 export interface ApplyRenderedAgentFilesOptions {
+  backupBaseDir?: string;
+  storageRoot?: string;
   workspaceRoot?: string;
   writeMode?: AgentSetupWriteMode;
 }
@@ -43,6 +45,8 @@ export async function applyRenderedAgentFiles(
   files: RenderedAgentFile[],
   options: ApplyRenderedAgentFilesOptions = {},
 ): Promise<ApplyRenderedAgentFilesResult> {
+  const storageRoot = options.storageRoot ?? options.workspaceRoot;
+  const backupBaseDir = options.backupBaseDir ?? options.workspaceRoot;
   const backups: RenderedAgentFileBackup[] = [];
   const stateEntries: AgentSetupStateEntry[] = [];
   const writtenFiles: string[] = [];
@@ -64,7 +68,8 @@ export async function applyRenderedAgentFiles(
       const backup = await maybeBackupFile(
         existing,
         file.path,
-        options.workspaceRoot,
+        storageRoot,
+        backupBaseDir,
         backupRunId,
       );
       if (backup) {
@@ -89,7 +94,8 @@ export async function applyRenderedAgentFiles(
     const backup = await maybeBackupFile(
       existing,
       file.path,
-      options.workspaceRoot,
+      storageRoot,
+      backupBaseDir,
       backupRunId,
     );
     if (backup) {
@@ -118,8 +124,8 @@ export async function applyRenderedAgentFiles(
     version: 2,
   };
 
-  if (options.workspaceRoot) {
-    await writeAgentSetupState(options.workspaceRoot, state);
+  if (storageRoot) {
+    await writeAgentSetupState(storageRoot, state);
   }
 
   return {
@@ -241,20 +247,21 @@ async function readOptionalFile(path: string): Promise<string> {
 async function maybeBackupFile(
   existingContent: string,
   targetPath: string,
-  workspaceRoot: string | undefined,
+  storageRoot: string | undefined,
+  backupBaseDir: string | undefined,
   backupRunId: string,
 ): Promise<RenderedAgentFileBackup | null> {
-  if (!existingContent || !workspaceRoot) {
+  if (!existingContent || !storageRoot || !backupBaseDir) {
     return null;
   }
 
   const backupPath = join(
-    workspaceRoot,
+    storageRoot,
     ".graphtrace",
     "backups",
     "agent-setup",
     backupRunId,
-    relative(workspaceRoot, targetPath),
+    toBackupRelativePath(backupBaseDir, targetPath),
   );
   await mkdir(dirname(backupPath), { recursive: true });
   await writeFile(backupPath, existingContent, "utf8");
@@ -366,10 +373,35 @@ function getAgentSetupStatePath(workspaceRoot: string): string {
   return join(workspaceRoot, AGENT_SETUP_STATE_PATH);
 }
 
+function toBackupRelativePath(baseDir: string, targetPath: string): string {
+  const relativePath = relative(baseDir, targetPath);
+  if (
+    relativePath &&
+    relativePath !== ".." &&
+    !relativePath.startsWith(`..${pathSeparator()}`)
+  ) {
+    return relativePath;
+  }
+
+  return join("__absolute__", ...splitAbsolutePath(targetPath));
+}
+
 function toGitIgnoreEntry(workspaceRoot: string, targetPath: string): string {
   return `/${relative(workspaceRoot, targetPath).replaceAll("\\", "/")}`;
 }
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function splitAbsolutePath(targetPath: string): string[] {
+  const normalized = resolve(targetPath)
+    .replaceAll("\\", "/")
+    .replace(/^[A-Za-z]:/, (value) => value.slice(0, -1).toLowerCase())
+    .replace(/^\/+/, "");
+  return normalized.split("/").filter(Boolean);
+}
+
+function pathSeparator(): string {
+  return process.platform === "win32" ? "\\" : "/";
 }

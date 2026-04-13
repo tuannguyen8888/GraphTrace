@@ -56,6 +56,24 @@ function runCliProcess(
   });
 }
 
+async function withUserHome<T>(
+  userHome: string,
+  callback: () => Promise<T>,
+): Promise<T> {
+  const previousHome = process.env.HOME;
+  process.env.HOME = userHome;
+
+  try {
+    return await callback();
+  } finally {
+    if (previousHome === undefined) {
+      process.env.HOME = undefined;
+    } else {
+      process.env.HOME = previousHome;
+    }
+  }
+}
+
 describe("cli", () => {
   const fixtureRoot = join(
     process.cwd(),
@@ -250,6 +268,41 @@ describe("cli", () => {
     ).resolves.toBeUndefined();
   });
 
+  test("agent setup --scope user writes shared user-level files instead of repo-local files", async () => {
+    const workspaceRoot = await mkdtemp(
+      join(tmpdir(), "graphtrace-cli-agent-user-"),
+    );
+    const userHome = await mkdtemp(join(tmpdir(), "graphtrace-cli-home-"));
+
+    const result = await withUserHome(userHome, () =>
+      runCli(["agent", "setup", "--scope", "user"], { cwd: workspaceRoot }),
+    );
+
+    expect(result.exitCode).toBe(0);
+    await expect(
+      access(join(userHome, ".codex", "config.toml")),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(join(userHome, ".codex", "skills", "graphtrace", "SKILL.md")),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(join(userHome, ".claude.json")),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(join(userHome, ".claude", "CLAUDE.md")),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(join(userHome, ".cursor", "mcp.json")),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(join(workspaceRoot, ".codex", "config.toml")),
+    ).rejects.toThrow();
+    await expect(access(join(workspaceRoot, ".mcp.json"))).rejects.toThrow();
+    await expect(
+      access(join(workspaceRoot, ".cursor", "mcp.json")),
+    ).rejects.toThrow();
+  });
+
   test("agent setup --dry-run previews changes without writing files", async () => {
     const workspaceRoot = await mkdtemp(
       join(tmpdir(), "graphtrace-cli-agent-"),
@@ -288,6 +341,22 @@ describe("cli", () => {
     await expect(
       access(join(workspaceRoot, ".cursor", "mcp.json")),
     ).rejects.toThrow();
+  });
+
+  test("agent setup --scope user rejects local write mode", async () => {
+    const workspaceRoot = await mkdtemp(
+      join(tmpdir(), "graphtrace-cli-agent-user-local-"),
+    );
+    const userHome = await mkdtemp(join(tmpdir(), "graphtrace-cli-home-"));
+
+    const result = await withUserHome(userHome, () =>
+      runCli(["agent", "setup", "--scope", "user", "--write-mode", "local"], {
+        cwd: workspaceRoot,
+      }),
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("write-mode local is only supported");
   });
 
   test("agent setup --write-mode local keeps generated files out of git status", async () => {
@@ -440,6 +509,28 @@ describe("cli", () => {
     expect(result.stdout).toContain("tool:cursor:configured");
   });
 
+  test("agent status --scope user reports configured user-level integrations", async () => {
+    const workspaceRoot = await mkdtemp(
+      join(tmpdir(), "graphtrace-cli-agent-status-user-"),
+    );
+    const userHome = await mkdtemp(join(tmpdir(), "graphtrace-cli-home-"));
+
+    const result = await withUserHome(userHome, async () => {
+      await runCli(["agent", "setup", "--scope", "user"], {
+        cwd: workspaceRoot,
+      });
+      return runCli(["agent", "status", "--scope", "user"], {
+        cwd: workspaceRoot,
+      });
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("agent status");
+    expect(result.stdout).toContain("tool:codex:configured");
+    expect(result.stdout).toContain("tool:claude:configured");
+    expect(result.stdout).toContain("tool:cursor:configured");
+  });
+
   test("agent status --json returns structured tool status", async () => {
     const workspaceRoot = await mkdtemp(
       join(tmpdir(), "graphtrace-cli-agent-status-json-"),
@@ -543,6 +634,38 @@ describe("cli", () => {
     await expect(
       access(join(workspaceRoot, ".cursor", "mcp.json")),
     ).resolves.toBeUndefined();
+  });
+
+  test("agent restore --scope user removes shared user-level files and restores prior content", async () => {
+    const workspaceRoot = await mkdtemp(
+      join(tmpdir(), "graphtrace-cli-agent-restore-user-"),
+    );
+    const userHome = await mkdtemp(join(tmpdir(), "graphtrace-cli-home-"));
+    const claudePath = join(userHome, ".claude", "CLAUDE.md");
+
+    await mkdir(join(userHome, ".claude"), { recursive: true });
+    await writeFile(claudePath, "# existing global claude memory\n", "utf8");
+
+    const restoreResult = await withUserHome(userHome, async () => {
+      await runCli(["agent", "setup", "--scope", "user"], {
+        cwd: workspaceRoot,
+      });
+      return runCli(["agent", "restore", "--scope", "user"], {
+        cwd: workspaceRoot,
+      });
+    });
+
+    expect(restoreResult.exitCode).toBe(0);
+    expect(await readFile(claudePath, "utf8")).toBe(
+      "# existing global claude memory\n",
+    );
+    await expect(
+      access(join(userHome, ".codex", "config.toml")),
+    ).rejects.toThrow();
+    await expect(access(join(userHome, ".claude.json"))).rejects.toThrow();
+    await expect(
+      access(join(userHome, ".cursor", "mcp.json")),
+    ).rejects.toThrow();
   });
 
   test("doctor --units reports discovered units for non-standard layouts", async () => {

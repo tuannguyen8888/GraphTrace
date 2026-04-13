@@ -13,7 +13,11 @@ import type {
 } from "@graphtrace/shared";
 import type { WorkspaceRecord } from "@graphtrace/storage";
 
-import { type SupportedAgentTool, planAgentBootstrap } from "./agent/bootstrap";
+import {
+  type AgentBootstrapScope,
+  type SupportedAgentTool,
+  planAgentBootstrap,
+} from "./agent/bootstrap";
 import {
   type AgentSetupWriteMode,
   applyRenderedAgentFiles,
@@ -358,19 +362,24 @@ const CLI_HELP_TREE: CliHelpCommand = {
     {
       name: "agent",
       heading: "graphtrace agent",
-      summary: "Generate and manage project-local agent integration files.",
+      summary:
+        "Generate and manage project or user-scoped agent integration files.",
       usage: "graphtrace agent <subcommand> [options]",
       commands: [
         {
           name: "setup",
           heading: "graphtrace agent setup",
-          summary: "Generate project-local MCP and instruction files.",
+          summary: "Generate project or user-scoped MCP and instruction files.",
           usage:
-            "graphtrace agent setup [--tool <codex|claude|cursor>] [--dry-run] [--write-mode <tracked|local>]",
+            "graphtrace agent setup [--tool <codex|claude|cursor>] [--scope <project|user>] [--dry-run] [--write-mode <tracked|local>] [--home <path>]",
           options: [
             {
               flags: "--tool <tool>",
               description: "Limit setup to one supported tool.",
+            },
+            {
+              flags: "--scope <scope>",
+              description: "Choose project-local or user-scoped installation.",
             },
             {
               flags: "--dry-run",
@@ -381,48 +390,76 @@ const CLI_HELP_TREE: CliHelpCommand = {
               description:
                 "Write generated files as tracked or local-only artifacts.",
             },
+            {
+              flags: "--home <path>",
+              description:
+                "Override the GraphTrace home used for user-scope backups and restore state.",
+            },
           ],
           examples: [
             "graphtrace agent setup",
             "graphtrace agent setup --dry-run",
             "graphtrace agent setup --tool codex",
+            "graphtrace agent setup --scope user",
           ],
         },
         {
           name: "status",
           heading: "graphtrace agent status",
-          summary: "Inspect configured GraphTrace agent files.",
+          summary:
+            "Inspect configured GraphTrace agent files for a chosen scope.",
           usage:
-            "graphtrace agent status [--tool <codex|claude|cursor>] [--json]",
+            "graphtrace agent status [--tool <codex|claude|cursor>] [--scope <project|user>] [--json] [--home <path>]",
           options: [
             {
               flags: "--tool <tool>",
               description: "Limit inspection to one supported tool.",
             },
             {
+              flags: "--scope <scope>",
+              description: "Inspect project-local or user-scoped integration.",
+            },
+            {
               flags: "--json",
               description: "Print status as structured JSON.",
+            },
+            {
+              flags: "--home <path>",
+              description:
+                "Override the GraphTrace home used for user-scope restore state.",
             },
           ],
           examples: [
             "graphtrace agent status",
             "graphtrace agent status --json",
+            "graphtrace agent status --scope user",
           ],
         },
         {
           name: "restore",
           heading: "graphtrace agent restore",
           summary: "Restore the most recent agent setup state.",
-          usage: "graphtrace agent restore [--tool <codex|claude|cursor>]",
+          usage:
+            "graphtrace agent restore [--tool <codex|claude|cursor>] [--scope <project|user>] [--home <path>]",
           options: [
             {
               flags: "--tool <tool>",
               description: "Restore only one supported tool.",
             },
+            {
+              flags: "--scope <scope>",
+              description: "Restore project-local or user-scoped integration.",
+            },
+            {
+              flags: "--home <path>",
+              description:
+                "Override the GraphTrace home used for user-scope restore state.",
+            },
           ],
           examples: [
             "graphtrace agent restore",
             "graphtrace agent restore --tool codex",
+            "graphtrace agent restore --scope user",
           ],
         },
       ],
@@ -437,9 +474,18 @@ const CLI_HELP_TREE: CliHelpCommand = {
       name: "mcp",
       heading: "graphtrace mcp",
       summary: "Start the GraphTrace MCP server on stdio.",
-      usage: "graphtrace mcp",
-      examples: ["graphtrace mcp"],
-      notes: ["This command stays alive and serves MCP requests over stdio."],
+      usage: "graphtrace mcp [--home <path>]",
+      options: [
+        {
+          flags: "--home <path>",
+          description: "Override the shared GraphTrace home directory.",
+        },
+      ],
+      examples: ["graphtrace mcp", "graphtrace mcp --home ~/.graphtrace-dev"],
+      notes: [
+        "This command stays alive and serves MCP requests over stdio.",
+        "When --home is omitted, GraphTrace uses the current user's home directory.",
+      ],
     },
   ],
 };
@@ -540,12 +586,26 @@ export async function runCli(
     }
     case "agent": {
       const [subcommand, ...agentArgs] = args;
+      const scope = readAgentScopeOption(agentArgs, "--scope") ?? "project";
       const selectedTool = readAgentToolOption(agentArgs, "--tool");
       const writeMode = readAgentWriteModeOption(agentArgs, "--write-mode");
+      const graphTraceHome = readHomeOption(agentArgs);
+      const userHomeDir = homedir();
 
       switch (subcommand) {
         case "setup": {
+          if (scope === "user" && writeMode === "local") {
+            return {
+              exitCode: 1,
+              stdout: "",
+              stderr:
+                "write-mode local is only supported for project-scoped agent setup",
+            };
+          }
+
           const plan = await planAgentBootstrap({
+            scope,
+            userHomeDir,
             workspaceRoot: cwd,
             tools: selectedTool ? [selectedTool] : undefined,
           });
@@ -559,7 +619,9 @@ export async function runCli(
                 writtenFiles: [],
               }
             : await applyRenderedAgentFiles(renderedFiles, {
-                workspaceRoot: cwd,
+                backupBaseDir: scope === "user" ? userHomeDir : cwd,
+                storageRoot: scope === "user" ? graphTraceHome : cwd,
+                workspaceRoot: scope === "project" ? cwd : undefined,
                 writeMode,
               });
 
@@ -578,6 +640,8 @@ export async function runCli(
         }
         case "status": {
           const plan = await planAgentBootstrap({
+            scope,
+            userHomeDir,
             workspaceRoot: cwd,
             tools: selectedTool ? [selectedTool] : undefined,
           });
@@ -591,7 +655,9 @@ export async function runCli(
           };
         }
         case "restore": {
-          const state = await loadAgentSetupState(cwd);
+          const state = await loadAgentSetupState(
+            scope === "user" ? graphTraceHome : cwd,
+          );
           if (!state) {
             return {
               exitCode: 1,
@@ -601,7 +667,7 @@ export async function runCli(
           }
 
           const restoredFiles = await restoreAgentSetupState(
-            cwd,
+            scope === "user" ? graphTraceHome : cwd,
             state,
             selectedTool,
           );
@@ -833,7 +899,10 @@ export async function runCli(
     }
     case "mcp": {
       const { createGraphTraceMcpServer } = await loadMcpModule();
-      await createGraphTraceMcpServer({ workspaceRoot: cwd });
+      await createGraphTraceMcpServer({
+        workspaceRoot: cwd,
+        homeDir: readHomeOption(args),
+      });
       return {
         exitCode: 0,
         stdout: "",
@@ -1313,6 +1382,18 @@ function readAgentToolOption(
 ): SupportedAgentTool | undefined {
   const raw = readOption(argv, name);
   if (raw === "codex" || raw === "claude" || raw === "cursor") {
+    return raw;
+  }
+
+  return undefined;
+}
+
+function readAgentScopeOption(
+  argv: string[],
+  name: string,
+): AgentBootstrapScope | undefined {
+  const raw = readOption(argv, name);
+  if (raw === "project" || raw === "user") {
     return raw;
   }
 

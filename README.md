@@ -61,7 +61,7 @@ Current capabilities include:
 - route discovery for Express, Fastify, Nest, and Next App Router
 - query hints for Prisma and Drizzle patterns
 - MCP tools for search, deps, impact, flow, status, routes, packages, and reindex
-- project-local agent bootstrap for Codex, Claude Code, and Cursor
+- project or user-scoped agent bootstrap for Codex, Claude Code, and Cursor
 - agent setup lifecycle commands for setup, status, JSON status, restore, and tool-scoped restore
 - local HTTP API plus an inspection-focused web UI
 - published npm CLI package plus GitHub release notes for tagged versions
@@ -159,18 +159,22 @@ Start the MCP server:
 
 ```bash
 graphtrace mcp
+graphtrace mcp --home ~/.graphtrace-dev
 ```
 
-Bootstrap project-local AI agent config:
+Bootstrap AI agent config:
 
 ```bash
 graphtrace agent setup
 graphtrace agent setup --dry-run
 graphtrace agent setup --tool codex
+graphtrace agent setup --scope user
 graphtrace agent status
 graphtrace agent status --json
+graphtrace agent status --scope user
 graphtrace agent restore
 graphtrace agent restore --tool codex
+graphtrace agent restore --scope user
 ```
 
 Typical workflow before a risky change:
@@ -192,43 +196,66 @@ graphtrace agent setup --tool codex
 
 ## AI Agent Setup
 
-GraphTrace can generate project-local MCP and instruction files for:
+GraphTrace can generate project or user-scoped MCP and instruction files for:
 
 - Codex
 - Claude Code
 - Cursor
 
-Run:
+Run the default project-local setup:
 
 ```bash
 graphtrace agent setup
 ```
 
-This command writes only repository-local files. It does not mutate global user config outside the repo.
+Or opt into a shared user-level install:
 
-Generated files:
+```bash
+graphtrace agent setup --scope user
+```
+
+`project` remains the default scope. Use `--scope user` when the same GraphTrace MCP entry should serve many repositories from one machine-level setup.
+
+Project scope generated files:
 
 - Codex: `.codex/config.toml`, `.agents/skills/graphtrace/SKILL.md`
 - Claude Code: `.mcp.json`, `.claude/CLAUDE.md`
 - Cursor: `.cursor/mcp.json`, `.cursor/rules/graphtrace.mdc`
 
+User scope generated files:
+
+- Codex: `~/.codex/config.toml`, `~/.codex/skills/graphtrace/SKILL.md`
+- Claude Code: `~/.claude.json`, `~/.claude/CLAUDE.md`
+- Cursor: `~/.cursor/mcp.json`
+
 Useful options:
 
 - `graphtrace agent setup --dry-run` previews planned changes without writing files
 - `graphtrace agent setup --tool codex` limits setup to one supported tool
+- `graphtrace agent setup --scope user` installs shared user-level config instead of repo-local files
+- `graphtrace agent setup --scope user --home ~/.graphtrace-dev` stores user-scope restore state and backups under an alternate GraphTrace home
+- `graphtrace agent setup --write-mode local` is available only for `--scope project`
 
 Lifecycle helpers:
 
 - `graphtrace agent status` checks whether the project-local GraphTrace files are currently configured for each supported tool
+- `graphtrace agent status --scope user` checks the shared user-level integration files
 - `graphtrace agent status --json` returns the same state in structured form for automation
 - `graphtrace agent restore` rolls back the most recent `agent setup` run using the state file and backups stored under `.graphtrace`
+- `graphtrace agent restore --scope user` rolls back the most recent shared user-level setup from the GraphTrace home
 - `graphtrace agent restore --tool codex` rolls back only one supported tool and keeps the remaining setup state intact
+
+State and backups:
+
+- project scope: `<repo>/.graphtrace/agent/setup-state.json` and `<repo>/.graphtrace/backups/agent-setup/`
+- user scope: `<graphtrace-home>/.graphtrace/agent/setup-state.json` and `<graphtrace-home>/.graphtrace/backups/agent-setup/`
 
 Why this helps:
 
-- gives agents a shared local MCP entry for `graphtrace mcp`
-- pins the Codex MCP working directory so GraphTrace resolves the repo-local `.graphtrace` data even when the tool launches from outside the workspace root
+- gives agents one shared local MCP entry for `graphtrace mcp`
+- removes the repo-pinned Codex `cwd` requirement so one MCP setup can serve every workspace registered in the shared GraphTrace home
 - teaches agents when to use GraphTrace tools like `search_code`, `get_dependencies`, `get_impact_analysis`, and `get_status`
+- gives agents `list_workspaces` plus optional `workspaceId` routing when multiple repos are indexed at the same time
 - encourages narrow semantic queries before broad repository scans, which reduces wasted context and token usage
 
 Manual step:
@@ -237,7 +264,7 @@ Manual step:
 
 ### Codex Workflow
 
-If you want Codex to proactively use GraphTrace while working inside a repo, installing the npm package is not enough on its own. You also need project-local setup inside that repository.
+If you want Codex to proactively use GraphTrace while working inside a repo, installing the npm package is not enough on its own. You still need repo-local guidance files if you want GraphTrace usage instructions to live with that repository, but the MCP server itself now reads from the shared GraphTrace home instead of a repo-pinned `cwd`.
 
 Recommended sequence:
 
@@ -250,9 +277,10 @@ graphtrace agent status
 
 After setup, Codex gets:
 
-- a repo-local MCP entry that runs `graphtrace mcp`
+- a repo-local MCP entry that runs `graphtrace mcp` against the shared GraphTrace home
 - a local GraphTrace skill file that teaches when to prefer semantic graph queries over broad filesystem scans
 - a shared project convention for asking search, dependency, impact, and status questions with less prompt waste
+- a path to `list_workspaces` and `workspaceId` when more than one indexed repo could match the same question
 
 This is the difference between:
 
@@ -275,7 +303,7 @@ GraphTrace is designed to help both individual developers and teams answer the q
 - route discovery and route-to-code flow inspection when debugging request handling
 - local code search across symbols, files, packages, routes, and discovered units
 - structured repository context for AI agents through MCP instead of ad hoc prompt stuffing
-- project-local agent setup so teams can standardize AI tooling per repository
+- project or user-scoped agent setup so teams can standardize AI tooling per repository or per machine
 - internal tooling powered from one graph/query backend instead of separate ad hoc scripts
 
 ## Architecture

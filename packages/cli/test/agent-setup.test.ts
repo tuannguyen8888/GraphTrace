@@ -70,6 +70,64 @@ describe("agent bootstrap", () => {
     );
   });
 
+  test("plans user-scoped targets under the current user home", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "graphtrace-agent-"));
+    const userHomeDir = await mkdtemp(join(tmpdir(), "graphtrace-agent-home-"));
+
+    const plan = await planAgentBootstrap({
+      scope: "user",
+      userHomeDir,
+      workspaceRoot,
+    });
+
+    expect(plan.tools.map((tool) => tool.id)).toEqual([
+      "codex",
+      "claude",
+      "cursor",
+    ]);
+
+    expect(plan.tools).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "codex",
+          targets: expect.arrayContaining([
+            expect.objectContaining({
+              path: join(userHomeDir, ".codex", "config.toml"),
+            }),
+            expect.objectContaining({
+              path: join(
+                userHomeDir,
+                ".codex",
+                "skills",
+                "graphtrace",
+                "SKILL.md",
+              ),
+            }),
+          ]),
+        }),
+        expect.objectContaining({
+          id: "claude",
+          targets: expect.arrayContaining([
+            expect.objectContaining({
+              path: join(userHomeDir, ".claude.json"),
+            }),
+            expect.objectContaining({
+              path: join(userHomeDir, ".claude", "CLAUDE.md"),
+            }),
+          ]),
+        }),
+        expect.objectContaining({
+          id: "cursor",
+          targets: expect.arrayContaining([
+            expect.objectContaining({
+              path: join(userHomeDir, ".cursor", "mcp.json"),
+            }),
+          ]),
+        }),
+      ]),
+    );
+  });
+
   test("keeps planning files even when tool executables are not installed", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "graphtrace-agent-"));
 
@@ -87,7 +145,7 @@ describe("agent bootstrap", () => {
     expect(plan.tools.every((tool) => tool.targets.length > 0)).toBe(true);
   });
 
-  test("renders Codex config with a GraphTrace MCP stdio entry pinned to the repo cwd", async () => {
+  test("renders Codex config with a shared GraphTrace MCP stdio entry instead of a repo-pinned cwd", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "graphtrace-agent-"));
     const plan = await planAgentBootstrap({ workspaceRoot });
 
@@ -99,7 +157,7 @@ describe("agent bootstrap", () => {
     expect(codexConfig?.content).toContain("[mcp_servers.graphtrace]");
     expect(codexConfig?.content).toContain('command = "graphtrace"');
     expect(codexConfig?.content).toContain('args = ["mcp"]');
-    expect(codexConfig?.content).toContain('cwd = "."');
+    expect(codexConfig?.content).not.toContain('cwd = "."');
   });
 
   test("renders the Codex skill as an operating guide with concrete query sequences", async () => {
@@ -134,6 +192,8 @@ describe("agent bootstrap", () => {
     expect(codexSkill?.content).toContain(
       "Re-run `run_index` after significant workspace changes",
     );
+    expect(codexSkill?.content).toContain("`list_workspaces`");
+    expect(codexSkill?.content).toContain("`workspaceId`");
   });
 
   test("renders Claude config and managed CLAUDE.md guidance", async () => {
@@ -174,6 +234,41 @@ describe("agent bootstrap", () => {
     expect(mcpConfig?.content).toContain('"graphtrace"');
     expect(cursorRule?.content).toContain("description: GraphTrace usage");
     expect(cursorRule?.content).toContain("search_code");
+  });
+
+  test("renders user-scoped files without requiring a Cursor project rule", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "graphtrace-agent-"));
+    const userHomeDir = await mkdtemp(join(tmpdir(), "graphtrace-agent-home-"));
+    const plan = await planAgentBootstrap({
+      scope: "user",
+      userHomeDir,
+      workspaceRoot,
+    });
+
+    const renderedFiles = renderAgentBootstrapFiles(plan);
+
+    expect(renderedFiles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: join(userHomeDir, ".codex", "config.toml"),
+        }),
+        expect.objectContaining({
+          path: join(userHomeDir, ".codex", "skills", "graphtrace", "SKILL.md"),
+        }),
+        expect.objectContaining({
+          path: join(userHomeDir, ".claude.json"),
+        }),
+        expect.objectContaining({
+          path: join(userHomeDir, ".claude", "CLAUDE.md"),
+        }),
+        expect.objectContaining({
+          path: join(userHomeDir, ".cursor", "mcp.json"),
+        }),
+      ]),
+    );
+    expect(
+      renderedFiles.some((file) => file.path.endsWith("graphtrace.mdc")),
+    ).toBe(false);
   });
 
   test("re-running file reconciliation does not duplicate GraphTrace entries", async () => {
@@ -283,6 +378,7 @@ describe("agent bootstrap", () => {
       expect(file.content).toContain("get_routes");
       expect(file.content).toContain("get_status");
       expect(file.content).toContain("run_index");
+      expect(file.content).toContain("list_workspaces");
     }
   });
 
