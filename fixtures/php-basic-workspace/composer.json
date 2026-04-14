@@ -1,0 +1,6 @@
+{
+  "name": "fixture/php-basic-workspace",
+  "require": {
+    "php": "^8.2"
+  }
+}

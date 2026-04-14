@@ -1,0 +1,8 @@
+{
+  "name": "fixture/php-mixed-api",
+  "autoload": {
+    "psr-4": {
+      "App\\": "app/"
+    }
+  }
+}

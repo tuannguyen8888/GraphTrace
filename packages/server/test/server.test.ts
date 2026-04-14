@@ -22,6 +22,11 @@ const symbolGraphFixtureRoot = join(
   "fixtures",
   "symbol-graph-workspace",
 );
+const crudboosterLegacyFixtureRoot = join(
+  process.cwd(),
+  "fixtures",
+  "crudbooster-legacy-workspace",
+);
 const builtWebRoot = join(process.cwd(), "apps", "web", "dist");
 const selfHostRoot = process.cwd();
 
@@ -269,6 +274,67 @@ describe("server", () => {
         expect.arrayContaining([
           expect.objectContaining({
             id: "symbol:apps/api/src/services/user-service.ts#withAudit",
+          }),
+        ]),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("serves php and crudbooster-derived graph APIs without shape changes", async () => {
+    await ensureWorkspaceInitialized(crudboosterLegacyFixtureRoot);
+    await indexWorkspace({
+      workspaceRoot: crudboosterLegacyFixtureRoot,
+      full: true,
+    });
+
+    const app = createGraphTraceApp({
+      workspaceRoot: crudboosterLegacyFixtureRoot,
+    });
+
+    try {
+      const routes = await app.inject({
+        method: "GET",
+        url: "/api/routes",
+      });
+      const flow = await app.inject({
+        method: "GET",
+        url: `/api/flow?target=${encodeURIComponent("GET /admin/users")}`,
+      });
+      const symbols = await app.inject({
+        method: "GET",
+        url: "/api/symbols/search?q=AdminUsersController",
+      });
+
+      const routesPayload = routes.json();
+      const flowPayload = flow.json();
+      const symbolsPayload = symbols.json();
+
+      expect(routesPayload.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            method: "GET",
+            path: "/admin/users",
+            framework: "laravel",
+          }),
+        ]),
+      );
+      expect(flowPayload.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: "query",
+            id: expect.stringContaining(
+              "User::query()->where('active', 1)->get(",
+            ),
+          }),
+        ]),
+      );
+      expect(symbolsPayload.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "symbol:app/Http/Controllers/AdminUsersController.php#AdminUsersController",
+            frameworkRole: "crudbooster-module",
           }),
         ]),
       );

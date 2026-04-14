@@ -80,6 +80,7 @@ describe("cli", () => {
     "fixtures",
     "express-prisma-workspace",
   );
+  const phpFixtureRoot = join(process.cwd(), "fixtures", "php-basic-workspace");
 
   test("init creates the .graphtrace workspace", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "graphtrace-cli-"));
@@ -678,6 +679,16 @@ describe("cli", () => {
     expect(result.stdout).toContain('"rootPath": "frontend"');
   });
 
+  test("doctor --units reports php workspace units", async () => {
+    const result = await runCli(["doctor", "--units"], {
+      cwd: phpFixtureRoot,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('"language": "php"');
+    expect(result.stdout).toContain('"rootPath": "."');
+  });
+
   test("doctor --plugins reports matched plugins for discovered units", async () => {
     const result = await runCli(["doctor", "--plugins"], {
       cwd: join(process.cwd(), "fixtures", "next-api-workspace"),
@@ -686,6 +697,32 @@ describe("cli", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain('"pluginId": "framework:next"');
     expect(result.stdout).toContain('"pluginId": "language:js-ts"');
+  });
+
+  test("doctor --plugins does not report app framework matches for the self-host indexer package", async () => {
+    const result = await runCli(["doctor", "--plugins"], {
+      cwd: process.cwd(),
+    });
+
+    const payload = JSON.parse(result.stdout) as Array<{
+      rootPath: string;
+      plugins: Array<{
+        pluginId: string;
+        kind: string;
+      }>;
+    }>;
+    const indexerEntry = payload.find(
+      (entry) => entry.rootPath === "packages/indexer",
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(indexerEntry?.plugins).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "framework-plugin",
+        }),
+      ]),
+    );
   });
 
   test("index supports --json and status reports workspace/index metadata", async () => {

@@ -108,6 +108,9 @@ importers:
       fast-glob:
         specifier: ^3.3.3
         version: 3.3.3
+      php-parser:
+        specifier: ^3.5.1
+        version: 3.5.1
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -1551,6 +1554,9 @@ packages:
   pathval@2.0.1:
     resolution: {integrity: sha512-//nshmD55c46FuFw26xV/xFAaB5HF9Xdap7HJBBnrKdAd6/GxDBaNA1870O79+9ueg61cZLSVc+OaFlfmObYVQ==}
     engines: {node: '>= 14.16'}
+
+  php-parser@3.5.1:
+    resolution: {integrity: sha512-0By/iMXxBM9nIapBXOdFGHlD2os9t/3Pk1aIavUzCH7jKFPjq1WYeOVOv/iXhELCjlL4ZlzKwK1keyxLQjll8g==}
 
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
@@ -3445,6 +3451,8 @@ snapshots:
   pathe@2.0.3: {}
 
   pathval@2.0.1: {}
+
+  php-parser@3.5.1: {}
 
   picocolors@1.1.1: {}
 

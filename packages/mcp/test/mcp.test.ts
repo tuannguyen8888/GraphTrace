@@ -17,6 +17,7 @@ const symbolGraphFixtureRoot = join(
   "fixtures",
   "symbol-graph-workspace",
 );
+const laravelFixtureRoot = join(repoRoot, "fixtures", "laravel-workspace");
 const cliEntry = join(repoRoot, "packages", "cli", "src", "bin.ts");
 
 interface ToolGraphItem {
@@ -520,6 +521,98 @@ describe("mcp", () => {
           kind: "route-handler",
         },
       });
+    } finally {
+      await transport.close().catch(() => undefined);
+      daemon.close();
+    }
+  }, 20_000);
+
+  test("returns laravel execution context and data flow through MCP tools", async () => {
+    await ensureWorkspaceInitialized(laravelFixtureRoot);
+    await indexWorkspace({ workspaceRoot: laravelFixtureRoot, full: true });
+
+    const homeDir = await mkdtemp(join(tmpdir(), "graphtrace-mcp-home-"));
+    const daemon = createGraphTraceDaemon({ homeDir });
+
+    const transport = new StdioClientTransport({
+      command: "pnpm",
+      args: [
+        "exec",
+        "node",
+        "--import",
+        "tsx",
+        cliEntry,
+        "mcp",
+        "--home",
+        homeDir,
+      ],
+      cwd: laravelFixtureRoot,
+      stderr: "pipe",
+    });
+    const client = new Client(
+      {
+        name: "graphtrace-laravel-mcp-client",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {},
+      },
+    );
+
+    try {
+      await daemon.addWorkspace(laravelFixtureRoot, {
+        label: "laravel",
+      });
+      await client.connect(transport);
+
+      const execution = await client.callTool({
+        name: "graphtrace_get_execution_context",
+        arguments: {
+          symbolId:
+            "symbol:app/Http/Controllers/UserController.php#UserController.index",
+        },
+      });
+      const flow = await client.callTool({
+        name: "get_data_flow",
+        arguments: {
+          target: "GET /users",
+          depth: 4,
+        },
+      });
+
+      const executionItems = readToolItems(execution.structuredContent);
+      const flowItems = readToolItems(flow.structuredContent);
+
+      expect(execution.isError).not.toBe(true);
+      expect(executionItems).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "GET /users",
+            kind: "route",
+          }),
+          expect.objectContaining({
+            id: "symbol:app/Services/UserService.php#UserService.listUsers",
+            kind: "symbol",
+          }),
+          expect.objectContaining({
+            kind: "query",
+            id: expect.stringContaining(
+              "User::query()->where('active', true)->get(",
+            ),
+          }),
+        ]),
+      );
+      expect(flow.isError).not.toBe(true);
+      expect(flowItems).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: "query",
+            id: expect.stringContaining(
+              "User::query()->where('active', true)->get(",
+            ),
+          }),
+        ]),
+      );
     } finally {
       await transport.close().catch(() => undefined);
       daemon.close();
