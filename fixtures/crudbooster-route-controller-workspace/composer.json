@@ -1,0 +1,7 @@
+{
+  "name": "graphtrace/crudbooster-route-controller-workspace",
+  "type": "project",
+  "require": {
+    "php": "^8.2"
+  }
+}
