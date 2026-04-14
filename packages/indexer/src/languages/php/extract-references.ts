@@ -19,6 +19,7 @@ interface PhpDeclaration {
   kind: "class" | "interface" | "trait" | "enum" | "function" | "method";
   name: string;
   namespace: string;
+  visibility?: string;
   ownerSymbolId?: string;
   ownerFqn?: string;
   fqn?: string;
@@ -307,6 +308,8 @@ function collectPhpDeclarations(
           kind: "method",
           name,
           namespace: namespaceName,
+          visibility:
+            typeof node.visibility === "string" ? node.visibility : undefined,
           ownerSymbolId: owner.symbolId,
           ownerFqn: owner.fqn,
         });

@@ -11,6 +11,9 @@ const LEGACY_PREFIX_GROUP_PATTERN =
   /Route::group\(\s*(?:array\s*\()?\s*([\s\S]*?)\s*(?:\)\s*)?,\s*function\s*\([^)]*\)\s*\{([\s\S]*?)\}\s*\);/g;
 const RESOURCE_ROUTE_PATTERN =
   /Route::(apiResource|resource)\(\s*['"]([^'"]+)['"]\s*,\s*([A-Za-z0-9_\\]+)::class/g;
+const CRUDBOOSTER_ROUTE_CONTROLLER_PATTERN =
+  /CRUDBooster::routeController\(\s*(['"])([^'"]*)\1\s*,\s*(['"])([^'"]+)\3(?:\s*,\s*([^)]+?))?\s*\)\s*;/g;
+const CRUDBOOSTER_ROUTE_WILDCARDS = "{one?}/{two?}/{three?}/{four?}/{five?}";
 
 export function extractLaravelRoutes(options: {
   filePath: string;
@@ -124,6 +127,23 @@ function extractRouteBlock(options: {
     );
   }
 
+  for (const match of remaining.matchAll(
+    CRUDBOOSTER_ROUTE_CONTROLLER_PATTERN,
+  )) {
+    routes.push(
+      ...expandCrudboosterRouteController({
+        prefix: options.prefix,
+        controllerPrefix: match[2],
+        controllerRef: match[4],
+        namespaceRef: readCrudboosterNamespace(match[5]),
+        filePath: options.filePath,
+        unitId: options.unitId,
+        aliases: options.aliases,
+        symbolIndex: options.symbolIndex,
+      }),
+    );
+  }
+
   return routes;
 }
 
@@ -205,6 +225,110 @@ function buildRouteItem(options: {
   };
 }
 
+function expandCrudboosterRouteController(options: {
+  prefix: string;
+  controllerPrefix: string;
+  controllerRef: string;
+  namespaceRef: string | null;
+  filePath: string;
+  unitId: string;
+  aliases: Map<string, string>;
+  symbolIndex: PhpSymbolIndex;
+}): RouteItem[] {
+  const controllerName = resolveCrudboosterControllerClass(
+    options.controllerRef,
+    options.namespaceRef,
+    options.aliases,
+  );
+  const basePath = joinRoutePath(options.prefix, options.controllerPrefix);
+  const declaration =
+    options.symbolIndex.classLikeByFqn.get(controllerName) ??
+    options.symbolIndex.classLikeByFqn.get(
+      normalizeQualifiedName(controllerName),
+    );
+  const ownerSymbolId = declaration?.symbolId;
+
+  const routes = [
+    buildRouteItem({
+      method: "GET",
+      path: basePath,
+      controllerName,
+      action: "getIndex",
+      filePath: options.filePath,
+      unitId: options.unitId,
+      symbolIndex: options.symbolIndex,
+    }),
+  ];
+
+  if (!ownerSymbolId) {
+    return routes;
+  }
+
+  const controllerMethods = [
+    ...options.symbolIndex.methodsByOwnerAndName.values(),
+  ]
+    .filter(
+      (method) =>
+        method.ownerSymbolId === ownerSymbolId &&
+        method.visibility === "public" &&
+        method.name !== "getIndex" &&
+        (method.name.startsWith("get") || method.name.startsWith("post")),
+    )
+    .sort((left, right) => left.name.localeCompare(right.name));
+
+  for (const method of controllerMethods) {
+    const route = buildCrudboosterConventionRoute({
+      basePath,
+      methodName: method.name,
+      controllerName,
+      filePath: options.filePath,
+      unitId: options.unitId,
+      symbolIndex: options.symbolIndex,
+    });
+    if (route) {
+      routes.push(route);
+    }
+  }
+
+  return routes;
+}
+
+function buildCrudboosterConventionRoute(options: {
+  basePath: string;
+  methodName: string;
+  controllerName: string;
+  filePath: string;
+  unitId: string;
+  symbolIndex: PhpSymbolIndex;
+}): RouteItem | null {
+  const methodPrefix = options.methodName.startsWith("get")
+    ? "get"
+    : options.methodName.startsWith("post")
+      ? "post"
+      : null;
+  if (!methodPrefix) {
+    return null;
+  }
+
+  const httpMethod = methodPrefix === "get" ? "GET" : "POST";
+  const suffix = options.methodName.slice(methodPrefix.length);
+  const slug = slugifyCrudboosterMethodSuffix(suffix);
+  const path = joinRoutePath(
+    options.basePath,
+    `${slug ? `${slug}/` : ""}${CRUDBOOSTER_ROUTE_WILDCARDS}`,
+  );
+
+  return buildRouteItem({
+    method: httpMethod,
+    path,
+    controllerName: options.controllerName,
+    action: options.methodName,
+    filePath: options.filePath,
+    unitId: options.unitId,
+    symbolIndex: options.symbolIndex,
+  });
+}
+
 function readUseAliases(sourceText: string): Map<string, string> {
   const aliases = new Map<string, string>();
 
@@ -241,12 +365,32 @@ function resolveControllerClass(
   return aliases.get(normalized) ?? `App\\Http\\Controllers\\${normalized}`;
 }
 
+function resolveCrudboosterControllerClass(
+  controllerRef: string,
+  namespaceRef: string | null,
+  aliases: Map<string, string>,
+): string {
+  if (namespaceRef) {
+    return normalizeQualifiedName(`${namespaceRef}\\${controllerRef}`);
+  }
+
+  return resolveControllerClass(controllerRef, aliases);
+}
+
 function joinRoutePath(prefix: string, path: string): string {
   const segments = [prefix, path]
     .map((segment) => segment.trim().replace(/^\/+|\/+$/g, ""))
     .filter(Boolean);
 
   return `/${segments.join("/")}`;
+}
+
+function slugifyCrudboosterMethodSuffix(value: string): string {
+  return value
+    .split(/(?=[A-Z])/)
+    .filter(Boolean)
+    .join("-")
+    .toLowerCase();
 }
 
 function singularize(value: string): string {
@@ -257,6 +401,15 @@ function singularize(value: string): string {
     return value.slice(0, -1);
   }
   return value;
+}
+
+function readCrudboosterNamespace(argument: string | undefined): string | null {
+  if (!argument) {
+    return null;
+  }
+
+  const match = argument.match(/['"]((?:\\.|[^'"])*)['"]/);
+  return match ? normalizeQualifiedName(match[1]) : null;
 }
 
 function normalizeQualifiedName(name: string): string {
