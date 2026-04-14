@@ -5,6 +5,9 @@ import type { RenderedAgentFile } from "./templates";
 
 const MANAGED_BLOCK_START = "<!-- graphtrace:managed:start -->";
 const MANAGED_BLOCK_END = "<!-- graphtrace:managed:end -->";
+const MANAGED_TOML_START = "# graphtrace:managed:start";
+const MANAGED_TOML_END = "# graphtrace:managed:end";
+const LEGACY_CODEX_GRAPHTRACE_SECTION = "[mcp_servers.graphtrace]";
 const AGENT_SETUP_STATE_PATH = join(".graphtrace", "agent", "setup-state.json");
 
 export interface ApplyRenderedAgentFilesOptions {
@@ -56,11 +59,17 @@ export async function applyRenderedAgentFiles(
     await mkdir(dirname(file.path), { recursive: true });
 
     const existing = await readOptionalFile(file.path);
-    if (file.strategy === "managed_markdown") {
-      const nextContent = reconcileManagedMarkdown(
-        existing,
-        file.managedContent ?? file.content,
-      );
+    if (
+      file.strategy === "managed_markdown" ||
+      file.strategy === "managed_toml"
+    ) {
+      const nextContent =
+        file.strategy === "managed_markdown"
+          ? reconcileManagedMarkdown(
+              existing,
+              file.managedContent ?? file.content,
+            )
+          : reconcileManagedToml(existing, file.managedContent ?? file.content);
       if (existing === nextContent) {
         continue;
       }
@@ -236,6 +245,40 @@ export function reconcileManagedMarkdown(
   return `${existingContent.replace(/\s*$/, "")}\n\n${managedBlock}\n`;
 }
 
+export function reconcileManagedToml(
+  existingContent: string,
+  managedContent: string,
+): string {
+  const managedBlock = [
+    MANAGED_TOML_START,
+    managedContent.trim(),
+    MANAGED_TOML_END,
+  ].join("\n");
+
+  if (!existingContent.trim()) {
+    return `${managedBlock}\n`;
+  }
+
+  const managedPattern = new RegExp(
+    `${escapeRegExp(MANAGED_TOML_START)}[\\s\\S]*?${escapeRegExp(MANAGED_TOML_END)}`,
+  );
+
+  if (managedPattern.test(existingContent)) {
+    return `${existingContent.replace(managedPattern, managedBlock).replace(/\s*$/, "")}\n`;
+  }
+
+  const withoutLegacySection = removeManagedTomlSection(
+    existingContent,
+    LEGACY_CODEX_GRAPHTRACE_SECTION,
+  );
+
+  if (!withoutLegacySection.trim()) {
+    return `${managedBlock}\n`;
+  }
+
+  return `${withoutLegacySection.replace(/\s*$/, "")}\n\n${managedBlock}\n`;
+}
+
 async function readOptionalFile(path: string): Promise<string> {
   try {
     return await readFile(path, "utf8");
@@ -392,6 +435,47 @@ function toGitIgnoreEntry(workspaceRoot: string, targetPath: string): string {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function removeManagedTomlSection(
+  content: string,
+  sectionHeader: string,
+): string {
+  const lines = content.split("\n");
+  const keptLines: string[] = [];
+  let skipping = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (!skipping && trimmed === sectionHeader) {
+      skipping = true;
+      continue;
+    }
+
+    if (skipping) {
+      if (isTomlSectionHeader(trimmed)) {
+        skipping = false;
+        keptLines.push(line);
+      }
+      continue;
+    }
+
+    keptLines.push(line);
+  }
+
+  return keptLines.join("\n").replace(/\n{3,}/g, "\n\n");
+}
+
+function isTomlSectionHeader(line: string): boolean {
+  if (!line) {
+    return false;
+  }
+
+  return (
+    (line.startsWith("[[") && line.endsWith("]]")) ||
+    (line.startsWith("[") && line.endsWith("]"))
+  );
 }
 
 function splitAbsolutePath(targetPath: string): string[] {

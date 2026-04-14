@@ -1,5 +1,13 @@
 # graphtrace
 
+## 1.6.2
+
+### Patch Changes
+
+- Fix `graphtrace agent setup --scope user` so Codex MCP bootstrap merges into an existing `~/.codex/config.toml` instead of overwriting unrelated Codex settings.
+
+  Preserve user config such as models, features, plugins, trusted projects, and other MCP servers while replacing legacy GraphTrace sections cleanly and keeping `agent status` consistent with the merged TOML strategy.
+
 ## 1.6.1
 
 ### Patch Changes

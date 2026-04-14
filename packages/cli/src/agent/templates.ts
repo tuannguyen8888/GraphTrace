@@ -9,7 +9,7 @@ export interface RenderedAgentFile {
   path: string;
   content: string;
   toolId: SupportedAgentTool;
-  strategy: "replace" | "managed_markdown";
+  strategy: "replace" | "managed_markdown" | "managed_toml";
   managedContent?: string;
 }
 
@@ -116,7 +116,7 @@ function renderCodexConfigFile(
       "",
     ].join("\n"),
     toolId: "codex",
-    strategy: "replace",
+    strategy: "managed_toml",
   };
 }
 
