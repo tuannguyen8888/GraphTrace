@@ -1,0 +1,10 @@
+{
+  "name": "laravel-vendor-noise-workspace",
+  "private": true,
+  "scripts": {
+    "dev": "vite"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}

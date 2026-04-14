@@ -337,6 +337,7 @@ export function deriveRepositories(
     .filter(
       (unit) =>
         unit.rootPath !== "." &&
+        !isDependencyRepositoryRoot(unit.rootPath) &&
         (unit.kind === "project" ||
           unit.kind === "subproject" ||
           unit.kind === "repo" ||
@@ -424,6 +425,14 @@ export function pathBelongsToRepository(
   repositories: RepositorySummary[],
 ): boolean {
   return resolveRepositoryForPath(path, repositories)?.id === repositoryId;
+}
+
+function isDependencyRepositoryRoot(rootPath: string): boolean {
+  return (
+    rootPath === "vendor" ||
+    rootPath.startsWith("vendor/") ||
+    rootPath.includes("/vendor/")
+  );
 }
 
 function normalizePathParts(value: string) {

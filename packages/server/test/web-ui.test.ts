@@ -428,6 +428,54 @@ describe("web ui view-model", () => {
     ).toBe("fixtures/express-prisma-workspace");
   });
 
+  test("ignores dependency directories when deriving repositories", () => {
+    const repositories = deriveRepositories([
+      ...units,
+      {
+        id: "unit:fixtures/laravel-vendor-noise-workspace",
+        rootPath: "fixtures/laravel-vendor-noise-workspace",
+        displayName: "laravel-vendor-noise-workspace",
+        kind: "subproject",
+        language: "php",
+        tooling: "php",
+        indexingMode: "full",
+        confidence: 95,
+        signals: [],
+        sourceRoots: ["fixtures/laravel-vendor-noise-workspace/app"],
+        parentUnitId: "unit:root",
+        pluginMatches: [],
+      },
+      {
+        id: "unit:fixtures/laravel-vendor-noise-workspace/vendor/crocodicstudio/crudbooster",
+        rootPath:
+          "fixtures/laravel-vendor-noise-workspace/vendor/crocodicstudio/crudbooster",
+        displayName: "crudbooster",
+        kind: "subproject",
+        language: "php",
+        tooling: "php",
+        indexingMode: "shallow",
+        confidence: 90,
+        signals: [],
+        sourceRoots: [],
+        parentUnitId: "unit:fixtures/laravel-vendor-noise-workspace",
+        pluginMatches: [],
+      },
+    ]);
+
+    expect(repositories.map((entry) => entry.id)).toEqual(
+      expect.arrayContaining([".", "fixtures/laravel-vendor-noise-workspace"]),
+    );
+    expect(repositories.map((entry) => entry.id)).not.toContain(
+      "fixtures/laravel-vendor-noise-workspace/vendor/crocodicstudio/crudbooster",
+    );
+    expect(
+      resolveRepositoryForPath(
+        "fixtures/laravel-vendor-noise-workspace/routes/web.php",
+        repositories,
+      )?.id,
+    ).toBe("fixtures/laravel-vendor-noise-workspace");
+  });
+
   test("filters fixtures out of the default primary scope but keeps them for tests scope", () => {
     expect(matchesScope("packages/server/src/index.ts", "primary")).toBe(true);
     expect(matchesScope("packages/cli/test/cli.test.ts", "primary")).toBe(
