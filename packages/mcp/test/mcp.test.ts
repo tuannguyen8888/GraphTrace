@@ -45,10 +45,21 @@ describe("mcp", () => {
   test("exposes the GraphTrace MCP toolset over stdio", async () => {
     await ensureWorkspaceInitialized(fixtureRoot);
     await indexWorkspace({ workspaceRoot: fixtureRoot, full: true });
+    const homeDir = await mkdtemp(join(tmpdir(), "graphtrace-mcp-home-"));
+    const daemon = createGraphTraceDaemon({ homeDir });
 
     const transport = new StdioClientTransport({
       command: "pnpm",
-      args: ["exec", "node", "--import", "tsx", cliEntry, "mcp"],
+      args: [
+        "exec",
+        "node",
+        "--import",
+        "tsx",
+        cliEntry,
+        "mcp",
+        "--home",
+        homeDir,
+      ],
       cwd: fixtureRoot,
       stderr: "pipe",
     });
@@ -69,6 +80,9 @@ describe("mcp", () => {
     );
 
     try {
+      await daemon.addWorkspace(fixtureRoot, {
+        label: "fixture",
+      });
       await client.connect(transport);
 
       const tools = await client.listTools();
@@ -251,6 +265,7 @@ describe("mcp", () => {
       );
     } finally {
       await transport.close().catch(() => undefined);
+      daemon.close();
     }
   }, 20_000);
 
@@ -358,10 +373,21 @@ describe("mcp", () => {
   test("exposes symbol search and lookup tools", async () => {
     await ensureWorkspaceInitialized(symbolGraphFixtureRoot);
     await indexWorkspace({ workspaceRoot: symbolGraphFixtureRoot, full: true });
+    const homeDir = await mkdtemp(join(tmpdir(), "graphtrace-mcp-home-"));
+    const daemon = createGraphTraceDaemon({ homeDir });
 
     const transport = new StdioClientTransport({
       command: "pnpm",
-      args: ["exec", "node", "--import", "tsx", cliEntry, "mcp"],
+      args: [
+        "exec",
+        "node",
+        "--import",
+        "tsx",
+        cliEntry,
+        "mcp",
+        "--home",
+        homeDir,
+      ],
       cwd: symbolGraphFixtureRoot,
       stderr: "pipe",
     });
@@ -376,6 +402,9 @@ describe("mcp", () => {
     );
 
     try {
+      await daemon.addWorkspace(symbolGraphFixtureRoot, {
+        label: "symbol-fixture",
+      });
       await client.connect(transport);
 
       const search = await client.callTool({
@@ -493,6 +522,7 @@ describe("mcp", () => {
       });
     } finally {
       await transport.close().catch(() => undefined);
+      daemon.close();
     }
   }, 20_000);
 });

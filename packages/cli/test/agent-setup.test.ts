@@ -271,6 +271,104 @@ describe("agent bootstrap", () => {
     ).toBe(false);
   });
 
+  test("merges the user-scoped Codex config without overwriting unrelated settings", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "graphtrace-agent-"));
+    const userHomeDir = await mkdtemp(join(tmpdir(), "graphtrace-agent-home-"));
+    const codexDir = join(userHomeDir, ".codex");
+    const codexConfigPath = join(codexDir, "config.toml");
+    const plan = await planAgentBootstrap({
+      scope: "user",
+      userHomeDir,
+      workspaceRoot,
+      tools: ["codex"],
+    });
+    const renderedFiles = renderAgentBootstrapFiles(plan);
+
+    await mkdir(codexDir, { recursive: true });
+    await writeFile(
+      codexConfigPath,
+      [
+        'model_provider = "llmgate"',
+        'model = "gpt-5.4"',
+        "",
+        "[features]",
+        "collab = true",
+        "",
+        "[mcp_servers.playwright]",
+        'command = "npx"',
+        'args = ["@playwright/mcp@latest"]',
+        "",
+        '[projects."/Users/example/WorkSpace"]',
+        'trust_level = "trusted"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    await applyRenderedAgentFiles(renderedFiles, {
+      workspaceRoot,
+      storageRoot: userHomeDir,
+      backupBaseDir: userHomeDir,
+    });
+
+    const nextConfig = await readFile(codexConfigPath, "utf8");
+
+    expect(nextConfig).toContain('model_provider = "llmgate"');
+    expect(nextConfig).toContain("[features]");
+    expect(nextConfig).toContain("[mcp_servers.playwright]");
+    expect(nextConfig).toContain('[projects."/Users/example/WorkSpace"]');
+    expect(nextConfig).toContain("[mcp_servers.graphtrace]");
+    expect(nextConfig).toContain('command = "graphtrace"');
+    expect(nextConfig).toContain('args = ["mcp"]');
+    expect(nextConfig).not.toContain('cwd = "."');
+  });
+
+  test("replaces a legacy Codex GraphTrace section instead of duplicating it", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "graphtrace-agent-"));
+    const userHomeDir = await mkdtemp(join(tmpdir(), "graphtrace-agent-home-"));
+    const codexDir = join(userHomeDir, ".codex");
+    const codexConfigPath = join(codexDir, "config.toml");
+    const plan = await planAgentBootstrap({
+      scope: "user",
+      userHomeDir,
+      workspaceRoot,
+      tools: ["codex"],
+    });
+    const renderedFiles = renderAgentBootstrapFiles(plan);
+
+    await mkdir(codexDir, { recursive: true });
+    await writeFile(
+      codexConfigPath,
+      [
+        'model_provider = "llmgate"',
+        "",
+        "[mcp_servers.graphtrace]",
+        'command = "graphtrace"',
+        'args = ["mcp"]',
+        'cwd = "."',
+        "",
+        "[features]",
+        "collab = true",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    await applyRenderedAgentFiles(renderedFiles, {
+      workspaceRoot,
+      storageRoot: userHomeDir,
+      backupBaseDir: userHomeDir,
+    });
+
+    const nextConfig = await readFile(codexConfigPath, "utf8");
+
+    expect(nextConfig.match(/\[mcp_servers\.graphtrace\]/g)).toHaveLength(1);
+    expect(nextConfig).not.toContain('cwd = "."');
+    expect(nextConfig).toContain("[features]");
+    expect(nextConfig).toContain("# graphtrace:managed:start");
+    expect(nextConfig).toContain("# graphtrace:managed:end");
+  });
+
   test("re-running file reconciliation does not duplicate GraphTrace entries", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "graphtrace-agent-"));
     const plan = await planAgentBootstrap({ workspaceRoot });

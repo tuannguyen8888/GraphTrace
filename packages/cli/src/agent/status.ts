@@ -5,7 +5,7 @@ import type {
   AgentBootstrapToolPlan,
   SupportedAgentTool,
 } from "./bootstrap";
-import { reconcileManagedMarkdown } from "./files";
+import { reconcileManagedMarkdown, reconcileManagedToml } from "./files";
 import { type RenderedAgentFile, renderAgentBootstrapFiles } from "./templates";
 
 export interface AgentToolStatus {
@@ -45,6 +45,18 @@ async function inspectToolStatus(
     if (file.strategy === "managed_markdown") {
       if (
         reconcileManagedMarkdown(
+          existingContent,
+          file.managedContent ?? file.content,
+        ).trimEnd() === existingContent.trimEnd()
+      ) {
+        configuredTargets += 1;
+      }
+      continue;
+    }
+
+    if (file.strategy === "managed_toml") {
+      if (
+        reconcileManagedToml(
           existingContent,
           file.managedContent ?? file.content,
         ).trimEnd() === existingContent.trimEnd()
