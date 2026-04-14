@@ -5,7 +5,7 @@
 [![GitHub Release](https://img.shields.io/github/v/release/tuannguyen8888/GraphTrace)](https://github.com/tuannguyen8888/GraphTrace/releases)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 
-GraphTrace is a local-first code graph for JavaScript and TypeScript projects that helps developers understand the blast radius of a change before they touch the code.
+GraphTrace is a local-first code graph for JavaScript, TypeScript, and PHP projects that helps developers understand the blast radius of a change before they touch the code.
 
 In large repos, the hard part is rarely just writing the patch. The hard part is answering the questions that decide whether the patch is safe:
 
@@ -48,7 +48,7 @@ GraphTrace is especially useful when you need fast answers to questions like:
 
 ## What You Can Use Today
 
-GraphTrace now supports JS/TS projects with automatic unit discovery.
+GraphTrace now supports JS/TS and PHP projects with automatic unit discovery.
 
 Current capabilities include:
 
@@ -58,13 +58,22 @@ Current capabilities include:
 - one daemon-backed UI that can manage many indexed workspaces
 - foreground watch mode with stale cleanup on add, change, and delete
 - search, dependency tracing, impact analysis, route flow, and workspace status
-- route discovery for Express, Fastify, Nest, and Next App Router
-- query hints for Prisma and Drizzle patterns
+- route discovery for Express, Fastify, Nest, Next App Router, and Laravel
+- Laravel route extraction for explicit controller arrays, legacy string controllers, grouped prefixes, and resource helpers
+- CrudBooster detection, module/model awareness, and `CRUDBooster::routeController(...)` convention expansion
+- query hints for Prisma, Drizzle, Eloquent-style `Model::query()` chains, and `DB::table()` / `DB::query()` patterns
 - MCP tools for search, deps, impact, flow, status, routes, packages, and reindex
 - project or user-scoped agent bootstrap for Codex, Claude Code, and Cursor
 - agent setup lifecycle commands for setup, status, JSON status, restore, and tool-scoped restore
 - local HTTP API plus an inspection-focused web UI
 - published npm CLI package plus GitHub release notes for tagged versions
+
+Current framework coverage:
+
+- JS/TS: Express, Fastify, Nest, and Next App Router
+- PHP: generic PHP symbol/query indexing plus Laravel route-to-handler stitching
+- Laravel legacy support: string controller syntax and array-based prefix groups
+- CrudBooster: admin module detection, model bindings, and route controller conventions
 
 ## Install
 
@@ -132,6 +141,15 @@ graphtrace routes
 graphtrace deps apps/api/src/routes/users.ts --direction out --depth 2
 graphtrace impact apps/api/src/services/user-service.ts --depth 4
 graphtrace flow "GET /users"
+```
+
+Laravel / CrudBooster example:
+
+```bash
+graphtrace search AdminUsersController --kind symbol
+graphtrace routes
+graphtrace flow "GET /admin/users"
+graphtrace impact app/Services/PurchaseDebtCalculationService.php --depth 4
 ```
 
 Start the local web UI:
@@ -300,7 +318,7 @@ GraphTrace is designed to help both individual developers and teams answer the q
 
 - impact analysis before changing a file, service, or package boundary
 - dependency tracing across packages and modules when a refactor might spread further than expected
-- route discovery and route-to-code flow inspection when debugging request handling
+- route discovery and route-to-code flow inspection when debugging JS backends or Laravel / CrudBooster request handling
 - local code search across symbols, files, packages, routes, and discovered units
 - structured repository context for AI agents through MCP instead of ad hoc prompt stuffing
 - project or user-scoped agent setup so teams can standardize AI tooling per repository or per machine
