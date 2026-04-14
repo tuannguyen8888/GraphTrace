@@ -27,7 +27,7 @@ import {
 import { inspectAgentBootstrapStatus } from "./agent/status";
 import { renderAgentBootstrapFiles } from "./agent/templates";
 
-const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx"]);
+const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".php"]);
 const IGNORED_NAMES = new Set([
   "node_modules",
   ".graphtrace",
@@ -1241,11 +1241,20 @@ async function collectWorkspaceSnapshot(workspaceRoot: string) {
   const config = await loadRuntimeConfig(workspaceRoot);
   const { inspectWorkspace } = await loadIndexerModule();
   const inspection = await inspectWorkspace(workspaceRoot, config);
-  const roots = inspection.units
-    .filter((unit) => unit.indexingMode === "full")
-    .flatMap((unit) =>
-      unit.sourceRoots.length > 0 ? unit.sourceRoots : [unit.rootPath],
-    );
+  const roots = [
+    ...new Set(
+      inspection.units
+        .filter(
+          (unit) =>
+            unit.indexingMode === "full" ||
+            unit.language === "php" ||
+            (unit.rootPath !== "." && unit.sourceRoots.length > 0),
+        )
+        .flatMap((unit) =>
+          unit.sourceRoots.length > 0 ? unit.sourceRoots : [unit.rootPath],
+        ),
+    ),
+  ];
 
   for (const root of roots) {
     await walkWorkspace(join(workspaceRoot, root), workspaceRoot, snapshot);

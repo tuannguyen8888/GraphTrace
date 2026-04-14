@@ -955,6 +955,16 @@ describe("web ui view-model", () => {
     ).toBe(
       'graphtrace deps "packages/indexer/src/workspace.ts" --direction both --depth 2',
     );
+    expect(
+      buildGraphTraceCommand({
+        id: "file:app/Http/Controllers/AdminUsersController.php",
+        kind: "file",
+        label: "app/Http/Controllers/AdminUsersController.php",
+        path: "app/Http/Controllers/AdminUsersController.php",
+      }),
+    ).toBe(
+      'graphtrace deps "app/Http/Controllers/AdminUsersController.php" --direction both --depth 2',
+    );
   });
 
   test("builds workspace cards for the home screen with status-aware summaries", () => {

@@ -39,7 +39,7 @@ export type GraphConfidenceLabel = (typeof GRAPH_CONFIDENCE_LABELS)[number];
 
 export type SearchKind = "symbol" | "route" | "file" | "package";
 export type DependencyDirection = "in" | "out" | "both";
-export type UnitLanguage = "js-ts" | "unknown";
+export type UnitLanguage = "js-ts" | "php" | "unknown";
 export type UnitKind =
   | "project"
   | "repo"
@@ -100,7 +100,7 @@ export interface SymbolDescriptor {
   name: string;
   displayName: string;
   kind: string;
-  language: "typescript" | "javascript" | "unknown";
+  language: "typescript" | "javascript" | "php" | "unknown";
   fileId: string;
   filePath: string;
   exported: boolean;

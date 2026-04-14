@@ -1,0 +1,7 @@
+{
+  "name": "crudbooster-legacy-workspace",
+  "require": {
+    "laravel/framework": "^10.0",
+    "crocodicstudio/crudbooster": "^5.6"
+  }
+}

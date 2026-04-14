@@ -146,4 +146,102 @@ describe("watch", () => {
       await watchResult.cleanup?.();
     }
   }, 20_000);
+
+  test("detects added, changed, and removed php files in watch snapshots", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "graphtrace-watch-php-"));
+    const workspaceRoot = join(tempRoot, "workspace");
+    tempRoots.push(tempRoot);
+    await cp(fixtureRoot, workspaceRoot, { recursive: true });
+    await rm(join(workspaceRoot, ".graphtrace"), {
+      recursive: true,
+      force: true,
+    });
+    await ensureWorkspaceInitialized(workspaceRoot);
+
+    let stdout = "";
+    let stderr = "";
+    const watchResult = await runCli(
+      ["watch", "--json", "--debounce-ms", "25"],
+      {
+        cwd: workspaceRoot,
+        emitStdout: (line) => {
+          stdout += `${line}\n`;
+        },
+        emitStderr: (line) => {
+          stderr += `${line}\n`;
+        },
+      },
+    );
+
+    const readCycles = async (count: number) => {
+      const start = Date.now();
+
+      while (Date.now() - start < 15_000) {
+        const lines = stdout
+          .trim()
+          .split("\n")
+          .filter(Boolean)
+          .map(
+            (line) =>
+              JSON.parse(line) as {
+                trigger?: string;
+                changedFiles?: string[];
+                removedFiles?: string[];
+              },
+          );
+
+        if (lines.length >= count) {
+          return lines;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+
+      throw new Error(
+        `Timed out waiting for ${count} watch cycles.\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`,
+      );
+    };
+
+    try {
+      expect(watchResult.keepAlive).toBe(true);
+
+      const phpFile = join(
+        workspaceRoot,
+        "apps",
+        "api",
+        "src",
+        "routes",
+        "admins.php",
+      );
+      const phpRelativePath = "apps/api/src/routes/admins.php";
+
+      const startupCycles = await readCycles(1);
+      expect(startupCycles[0]?.trigger).toBe("startup");
+
+      await writeFile(
+        phpFile,
+        "<?php\n\nfunction list_admins() {\n    return ['alice'];\n}\n",
+        "utf8",
+      );
+
+      const addCycles = await readCycles(2);
+      expect(addCycles[1]?.changedFiles).toContain(phpRelativePath);
+
+      await writeFile(
+        phpFile,
+        "<?php\n\nfunction list_admins() {\n    return ['alice', 'bob'];\n}\n",
+        "utf8",
+      );
+
+      const editCycles = await readCycles(3);
+      expect(editCycles[2]?.changedFiles).toContain(phpRelativePath);
+
+      await rm(phpFile, { force: true });
+
+      const removeCycles = await readCycles(4);
+      expect(removeCycles[3]?.removedFiles).toContain(phpRelativePath);
+    } finally {
+      await watchResult.cleanup?.();
+    }
+  }, 20_000);
 });
