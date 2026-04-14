@@ -1,5 +1,11 @@
 # @graphtrace/config
 
+## 1.7.0
+
+### Patch Changes
+
+- @graphtrace/shared@1.7.0
+
 ## 1.6.2
 
 ### Patch Changes
