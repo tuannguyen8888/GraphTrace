@@ -226,12 +226,64 @@ async function buildCandidate(options: {
   manifest?: PackageManifest;
 }): Promise<CandidateUnit> {
   const { rootPath, projectMarkers, sourceFiles, manifest } = options;
-  const markerPaths = new Set(
+  const rawMarkerPaths = new Set(
     projectMarkers.filter((marker) => pathIsWithin(marker, rootPath)),
   );
-  const candidateSourceFiles = sourceFiles.filter((filePath) =>
+  const rawCandidateSourceFiles = sourceFiles.filter((filePath) =>
     pathIsWithin(filePath, rootPath),
   );
+  const directMarkerPaths = collectDirectMarkerPaths(rootPath, rawMarkerPaths);
+  const hasPackageJson = directMarkerPaths.has(
+    joinWithinRoot(rootPath, "package.json"),
+  );
+  const hasTsConfig =
+    directMarkerPaths.has(joinWithinRoot(rootPath, "tsconfig.json")) ||
+    directMarkerPaths.has(joinWithinRoot(rootPath, "tsconfig.base.json")) ||
+    directMarkerPaths.has(joinWithinRoot(rootPath, "jsconfig.json"));
+  const hasWorkspaceManifest = directMarkerPaths.has("pnpm-workspace.yaml");
+  const hasNextConfig = [...directMarkerPaths].some(
+    (path) =>
+      path.endsWith("next.config.js") || path.endsWith("next.config.mjs"),
+  );
+  const hasNestConfig = directMarkerPaths.has(
+    joinWithinRoot(rootPath, "nest-cli.json"),
+  );
+  const hasPrismaSchema = [...directMarkerPaths].some((path) =>
+    path.endsWith("schema.prisma"),
+  );
+  const hasComposerJson = directMarkerPaths.has(
+    joinWithinRoot(rootPath, "composer.json"),
+  );
+  const hasArtisan = directMarkerPaths.has(joinWithinRoot(rootPath, "artisan"));
+  const hasLaravelBootstrap = rawCandidateSourceFiles.includes(
+    joinWithinRoot(rootPath, "bootstrap/app.php"),
+  );
+  const hasLaravelRoutes = rawCandidateSourceFiles.some((filePath) =>
+    pathIsWithin(filePath, joinWithinRoot(rootPath, "routes")),
+  );
+  const hasLaravelControllers = rawCandidateSourceFiles.some((filePath) =>
+    pathIsWithin(filePath, joinWithinRoot(rootPath, "app/Http/Controllers")),
+  );
+  const trimsLaravelDependencyNoise =
+    rootPath === "." &&
+    [
+      hasArtisan,
+      hasLaravelBootstrap,
+      hasLaravelRoutes,
+      hasLaravelControllers,
+    ].filter(Boolean).length >= 2;
+  const markerPaths = trimsLaravelDependencyNoise
+    ? new Set(
+        [...rawMarkerPaths].filter(
+          (markerPath) => !isLaravelDependencyNoisePath(rootPath, markerPath),
+        ),
+      )
+    : rawMarkerPaths;
+  const candidateSourceFiles = trimsLaravelDependencyNoise
+    ? rawCandidateSourceFiles.filter(
+        (filePath) => !isLaravelDependencyNoisePath(rootPath, filePath),
+      )
+    : rawCandidateSourceFiles;
   const jsSourceFiles = candidateSourceFiles.filter(isJsSourceFile);
   const phpSourceFiles = candidateSourceFiles.filter(isPhpSourceFile);
   const sourceSamples = (
@@ -262,38 +314,7 @@ async function buildCandidate(options: {
     filePath: entry.filePath,
     sourceText: entry.sourceText,
   }));
-  const hasPackageJson = markerPaths.has(
-    joinWithinRoot(rootPath, "package.json"),
-  );
-  const hasTsConfig =
-    markerPaths.has(joinWithinRoot(rootPath, "tsconfig.json")) ||
-    markerPaths.has(joinWithinRoot(rootPath, "tsconfig.base.json")) ||
-    markerPaths.has(joinWithinRoot(rootPath, "jsconfig.json"));
-  const hasWorkspaceManifest = markerPaths.has("pnpm-workspace.yaml");
-  const hasNextConfig = [...markerPaths].some(
-    (path) =>
-      path.endsWith("next.config.js") || path.endsWith("next.config.mjs"),
-  );
-  const hasNestConfig = markerPaths.has(
-    joinWithinRoot(rootPath, "nest-cli.json"),
-  );
-  const hasPrismaSchema = [...markerPaths].some((path) =>
-    path.endsWith("schema.prisma"),
-  );
   const frameworkHints = detectFrameworkHints(sourceSamples);
-  const hasComposerJson = markerPaths.has(
-    joinWithinRoot(rootPath, "composer.json"),
-  );
-  const hasArtisan = markerPaths.has(joinWithinRoot(rootPath, "artisan"));
-  const hasLaravelBootstrap = candidateSourceFiles.includes(
-    joinWithinRoot(rootPath, "bootstrap/app.php"),
-  );
-  const hasLaravelRoutes = candidateSourceFiles.some((filePath) =>
-    pathIsWithin(filePath, joinWithinRoot(rootPath, "routes")),
-  );
-  const hasLaravelControllers = candidateSourceFiles.some((filePath) =>
-    pathIsWithin(filePath, joinWithinRoot(rootPath, "app/Http/Controllers")),
-  );
   const phpFrameworkSamples = phpSourceSamples.filter(
     (sample) =>
       pathIsWithin(sample.filePath, joinWithinRoot(rootPath, "app")) ||
@@ -325,11 +346,19 @@ async function buildCandidate(options: {
       rootPath === "." ? filePath : filePath.slice(rootPath.length + 1);
     return /app\/Http\/Controllers\/.*Admin.*Controller\.php$/.test(relative);
   });
-  const nonJsMarkers = [...markerPaths].filter((path) =>
+  const nonJsMarkers = [...directMarkerPaths].filter((path) =>
     /(?:pyproject\.toml|go\.mod|Cargo\.toml|pom\.xml|composer\.json|requirements\.txt|\.sln)$/.test(
       path,
     ),
   );
+  const prefersPhpLanguage =
+    hasComposerJson &&
+    detectLaravelFramework({
+      rootPath,
+      deps: manifestDeps,
+      markerPaths,
+      sourceFiles: candidateSourceFiles,
+    });
 
   const sourceRoots = discoverSourceRoots(rootPath, candidateSourceFiles);
   const score =
@@ -349,8 +378,9 @@ async function buildCandidate(options: {
     hasNestConfig ||
     hasPrismaSchema;
   const phpSignal = hasComposerJson || phpSourceFiles.length > 0;
-  const language: UnitLanguage =
-    jsSignal && !phpSignal
+  const language: UnitLanguage = prefersPhpLanguage
+    ? "php"
+    : jsSignal && !phpSignal
       ? "js-ts"
       : phpSignal && !jsSignal
         ? "php"
@@ -378,8 +408,10 @@ async function buildCandidate(options: {
     ...frameworkHints.map((hint) => `hint:${hint}`),
     ...nonJsMarkers.map((marker) => `marker:${posix.basename(marker)}`),
   ];
+  const isDependencyPackage = isDependencyPackageRoot(rootPath);
 
   const indexingMode =
+    !isDependencyPackage &&
     language !== "unknown" &&
     score >= options.config.detection.minUnitConfidence
       ? "full"
@@ -392,7 +424,10 @@ async function buildCandidate(options: {
       (rootPath === "." ? "project-root" : posix.basename(rootPath)),
     kind: classifyUnitKind(rootPath),
     language,
-    tooling: detectTooling(markerPaths),
+    tooling: detectTooling({
+      directMarkerPaths,
+      prefersPhpLanguage,
+    }),
     confidence: Math.min(
       100,
       Math.max(score, nonJsMarkers.length > 0 ? 60 : 10),
@@ -416,7 +451,9 @@ function selectCandidates(
   const strongRoots = candidates
     .filter(
       (candidate) =>
-        candidate.language !== "unknown" && candidate.confidence >= threshold,
+        candidate.indexingMode === "full" &&
+        candidate.language !== "unknown" &&
+        candidate.confidence >= threshold,
     )
     .map((candidate) => candidate.rootPath);
 
@@ -676,20 +713,53 @@ function classifyUnitKind(rootPath: string): UnitKind {
   return "subproject";
 }
 
-function detectTooling(markerPaths: Set<string>): string {
-  if (markerPaths.has("pnpm-workspace.yaml")) {
+function detectTooling(options: {
+  directMarkerPaths: Set<string>;
+  prefersPhpLanguage: boolean;
+}): string {
+  if (options.prefersPhpLanguage) {
+    return "php";
+  }
+  if (options.directMarkerPaths.has("pnpm-workspace.yaml")) {
     return "pnpm";
   }
-  if ([...markerPaths].some((path) => path.endsWith("package.json"))) {
+  if (
+    [...options.directMarkerPaths].some((path) => path.endsWith("package.json"))
+  ) {
     return "node";
   }
-  if ([...markerPaths].some((path) => path.endsWith("pyproject.toml"))) {
+  if (
+    [...options.directMarkerPaths].some((path) =>
+      path.endsWith("pyproject.toml"),
+    )
+  ) {
     return "python";
   }
-  if ([...markerPaths].some((path) => path.endsWith("composer.json"))) {
+  if (
+    [...options.directMarkerPaths].some((path) =>
+      path.endsWith("composer.json"),
+    )
+  ) {
     return "php";
   }
   return "unknown";
+}
+
+function collectDirectMarkerPaths(
+  rootPath: string,
+  markerPaths: Set<string>,
+): Set<string> {
+  const directMarkerPaths = new Set<string>();
+
+  for (const markerPath of markerPaths) {
+    const relative =
+      rootPath === "." ? markerPath : markerPath.slice(rootPath.length + 1);
+    if (!relative.includes("/")) {
+      directMarkerPaths.add(markerPath);
+    }
+  }
+
+  return directMarkerPaths;
 }
 
 function buildUnitId(rootPath: string): string {
@@ -732,6 +802,21 @@ function pathIsWithin(targetPath: string, rootPath: string): boolean {
   }
 
   return targetPath === rootPath || targetPath.startsWith(`${rootPath}/`);
+}
+
+function isLaravelDependencyNoisePath(rootPath: string, targetPath: string) {
+  const relative =
+    rootPath === "." ? targetPath : targetPath.slice(rootPath.length + 1);
+
+  return (
+    relative.startsWith("vendor/") || relative.startsWith("public/vendor/")
+  );
+}
+
+function isDependencyPackageRoot(rootPath: string) {
+  return (
+    rootPath.startsWith("vendor/") || rootPath.startsWith("public/vendor/")
+  );
 }
 
 function compareRootPaths(left: string, right: string): number {
