@@ -8,14 +8,26 @@ import { createGraphTraceApp } from "../../../../packages/server/src/index";
 
 const PORT = 4310;
 const HOST = "127.0.0.1";
-const fixtureRoot = join(process.cwd(), "fixtures", "symbol-graph-workspace");
+const symbolGraphFixtureRoot = join(
+  process.cwd(),
+  "fixtures",
+  "symbol-graph-workspace",
+);
+const crudboosterFixtureRoot = join(
+  process.cwd(),
+  "fixtures",
+  "crudbooster-legacy-workspace",
+);
 
 const homeDir = await mkdtemp(join(tmpdir(), "graphtrace-playwright-"));
 const daemon = createGraphTraceDaemon({ homeDir });
 
 try {
-  await daemon.addWorkspace(fixtureRoot, {
+  await daemon.addWorkspace(symbolGraphFixtureRoot, {
     label: "Symbol Graph Fixture",
+  });
+  await daemon.addWorkspace(crudboosterFixtureRoot, {
+    label: "CrudBooster Fixture",
   });
 
   const app = createGraphTraceApp({ daemon });

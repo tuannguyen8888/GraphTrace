@@ -13,6 +13,7 @@
     "@graphtrace/shared": "workspace:*",
     "@graphtrace/storage": "workspace:*",
     "fast-glob": "^3.3.3",
+    "php-parser": "^3.5.1",
     "typescript": "^5.9.3"
   }
 }

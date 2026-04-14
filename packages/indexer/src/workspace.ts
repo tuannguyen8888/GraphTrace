@@ -11,6 +11,8 @@ import type {
   UnitLanguage,
 } from "@graphtrace/shared";
 import { toPosixPath } from "@graphtrace/shared";
+import { detectCrudBoosterFramework } from "./frameworks/php/crudbooster/detect";
+import { detectLaravelFramework } from "./frameworks/php/laravel/detect";
 
 const INTERNAL_PLUGIN_VERSION = "internal";
 const IGNORED_GLOBS = [
@@ -22,7 +24,7 @@ const IGNORED_GLOBS = [
   "**/.next/**",
   "**/coverage/**",
 ];
-const SOURCE_GLOB = "**/*.{ts,tsx,js,jsx}";
+const SOURCE_GLOB = "**/*.{ts,tsx,js,jsx,php}";
 const PROJECT_MARKER_GLOBS = [
   "package.json",
   "**/package.json",
@@ -49,6 +51,8 @@ const PROJECT_MARKER_GLOBS = [
   "**/pom.xml",
   "composer.json",
   "**/composer.json",
+  "artisan",
+  "**/artisan",
   "requirements.txt",
   "**/requirements.txt",
   "*.sln",
@@ -60,6 +64,8 @@ interface PackageManifest {
   private?: boolean;
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
+  require?: Record<string, string>;
+  "require-dev"?: Record<string, string>;
 }
 
 interface CandidateUnit {
@@ -77,6 +83,14 @@ interface CandidateUnit {
   frameworkHints: string[];
   markerPaths: Set<string>;
   sourceFiles: string[];
+}
+
+function isJsSourceFile(filePath: string): boolean {
+  return /\.(ts|tsx|js|jsx)$/.test(filePath);
+}
+
+function isPhpSourceFile(filePath: string): boolean {
+  return filePath.endsWith(".php");
 }
 
 export interface WorkspacePackageInfo {
@@ -117,13 +131,14 @@ export async function inspectWorkspace(
   }
 
   const manifests = new Map<string, PackageManifest>();
-  for (const marker of projectMarkers.filter((path) =>
-    path.endsWith("package.json"),
+  for (const marker of projectMarkers.filter(
+    (path) => path.endsWith("package.json") || path.endsWith("composer.json"),
   )) {
-    manifests.set(
-      normalizeRootPath(posix.dirname(toPosixPath(marker))),
-      await readPackageManifest(join(workspaceRoot, marker)),
-    );
+    const rootPath = normalizeRootPath(posix.dirname(toPosixPath(marker)));
+    manifests.set(rootPath, {
+      ...manifests.get(rootPath),
+      ...(await readPackageManifest(join(workspaceRoot, marker))),
+    });
   }
 
   const candidates = await Promise.all(
@@ -151,7 +166,7 @@ export async function inspectWorkspace(
   for (const candidate of selectedCandidates) {
     const unitId = buildUnitId(candidate.rootPath);
     const sourceFilesForUnit =
-      candidate.indexingMode === "full" && candidate.language === "js-ts"
+      candidate.indexingMode === "full" && candidate.language !== "unknown"
         ? candidate.sourceFiles.filter(
             (filePath) =>
               !fullUnitRoots.some(
@@ -217,9 +232,25 @@ async function buildCandidate(options: {
   const candidateSourceFiles = sourceFiles.filter((filePath) =>
     pathIsWithin(filePath, rootPath),
   );
+  const jsSourceFiles = candidateSourceFiles.filter(isJsSourceFile);
+  const phpSourceFiles = candidateSourceFiles.filter(isPhpSourceFile);
   const sourceSamples = (
     await Promise.all(
-      candidateSourceFiles.slice(0, 12).map(async (filePath) => ({
+      jsSourceFiles.slice(0, 12).map(async (filePath) => ({
+        filePath,
+        sourceText: await readFile(
+          join(options.workspaceRoot, filePath),
+          "utf8",
+        ),
+      })),
+    )
+  ).map((entry) => ({
+    filePath: entry.filePath,
+    sourceText: entry.sourceText,
+  }));
+  const phpSourceSamples = (
+    await Promise.all(
+      phpSourceFiles.slice(0, 12).map(async (filePath) => ({
         filePath,
         sourceText: await readFile(
           join(options.workspaceRoot, filePath),
@@ -250,6 +281,50 @@ async function buildCandidate(options: {
     path.endsWith("schema.prisma"),
   );
   const frameworkHints = detectFrameworkHints(sourceSamples);
+  const hasComposerJson = markerPaths.has(
+    joinWithinRoot(rootPath, "composer.json"),
+  );
+  const hasArtisan = markerPaths.has(joinWithinRoot(rootPath, "artisan"));
+  const hasLaravelBootstrap = candidateSourceFiles.includes(
+    joinWithinRoot(rootPath, "bootstrap/app.php"),
+  );
+  const hasLaravelRoutes = candidateSourceFiles.some((filePath) =>
+    pathIsWithin(filePath, joinWithinRoot(rootPath, "routes")),
+  );
+  const hasLaravelControllers = candidateSourceFiles.some((filePath) =>
+    pathIsWithin(filePath, joinWithinRoot(rootPath, "app/Http/Controllers")),
+  );
+  const phpFrameworkSamples = phpSourceSamples.filter(
+    (sample) =>
+      pathIsWithin(sample.filePath, joinWithinRoot(rootPath, "app")) ||
+      pathIsWithin(sample.filePath, joinWithinRoot(rootPath, "routes")),
+  );
+  const manifestDeps = {
+    ...manifest?.dependencies,
+    ...manifest?.devDependencies,
+    ...manifest?.require,
+    ...manifest?.["require-dev"],
+  };
+  const hasCrudBoosterDependency = Object.keys(manifestDeps).some((name) =>
+    name.toLowerCase().includes("crudbooster"),
+  );
+  const hasCrudBoosterController = phpFrameworkSamples.some((sample) =>
+    /extends\s+CBController\b/.test(sample.sourceText),
+  );
+  const hasCrudBoosterInit = phpFrameworkSamples.some((sample) =>
+    /\bfunction\s+cbInit\s*\(/.test(sample.sourceText),
+  );
+  const hasCrudBoosterAdminController = phpSourceFiles.some((filePath) => {
+    if (
+      !pathIsWithin(filePath, joinWithinRoot(rootPath, "app/Http/Controllers"))
+    ) {
+      return false;
+    }
+
+    const relative =
+      rootPath === "." ? filePath : filePath.slice(rootPath.length + 1);
+    return /app\/Http\/Controllers\/.*Admin.*Controller\.php$/.test(relative);
+  });
   const nonJsMarkers = [...markerPaths].filter((path) =>
     /(?:pyproject\.toml|go\.mod|Cargo\.toml|pom\.xml|composer\.json|requirements\.txt|\.sln)$/.test(
       path,
@@ -259,6 +334,7 @@ async function buildCandidate(options: {
   const sourceRoots = discoverSourceRoots(rootPath, candidateSourceFiles);
   const score =
     (hasPackageJson ? 50 : 0) +
+    (hasComposerJson ? 50 : 0) +
     (hasTsConfig ? 20 : 0) +
     (candidateSourceFiles.length > 0 ? 40 : 0) +
     (hasWorkspaceManifest ? 25 : 0) +
@@ -268,15 +344,21 @@ async function buildCandidate(options: {
   const jsSignal =
     hasPackageJson ||
     hasTsConfig ||
-    candidateSourceFiles.length > 0 ||
+    jsSourceFiles.length > 0 ||
     hasNextConfig ||
     hasNestConfig ||
     hasPrismaSchema;
+  const phpSignal = hasComposerJson || phpSourceFiles.length > 0;
   const language: UnitLanguage =
-    jsSignal && nonJsMarkers.length === 0 ? "js-ts" : "unknown";
+    jsSignal && !phpSignal
+      ? "js-ts"
+      : phpSignal && !jsSignal
+        ? "php"
+        : "unknown";
 
   const signals = [
     ...(hasPackageJson ? ["package.json"] : []),
+    ...(hasComposerJson ? ["composer.json"] : []),
     ...(hasTsConfig ? ["tsconfig/jsconfig"] : []),
     ...(candidateSourceFiles.length > 0
       ? [`source:${candidateSourceFiles.length}`]
@@ -285,12 +367,21 @@ async function buildCandidate(options: {
     ...(hasNextConfig ? ["next-config"] : []),
     ...(hasNestConfig ? ["nest-config"] : []),
     ...(hasPrismaSchema ? ["prisma-schema"] : []),
+    ...(hasArtisan ? ["laravel-artisan"] : []),
+    ...(hasLaravelBootstrap ? ["laravel-bootstrap"] : []),
+    ...(hasLaravelRoutes ? ["laravel-routes"] : []),
+    ...(hasLaravelControllers ? ["laravel-controllers"] : []),
+    ...(hasCrudBoosterDependency ? ["crudbooster-dependency"] : []),
+    ...(hasCrudBoosterController ? ["crudbooster-cbcontroller"] : []),
+    ...(hasCrudBoosterInit ? ["crudbooster-cbinit"] : []),
+    ...(hasCrudBoosterAdminController ? ["crudbooster-admin-controller"] : []),
     ...frameworkHints.map((hint) => `hint:${hint}`),
     ...nonJsMarkers.map((marker) => `marker:${posix.basename(marker)}`),
   ];
 
   const indexingMode =
-    language === "js-ts" && score >= options.config.detection.minUnitConfidence
+    language !== "unknown" &&
+    score >= options.config.detection.minUnitConfidence
       ? "full"
       : "shallow";
 
@@ -325,7 +416,7 @@ function selectCandidates(
   const strongRoots = candidates
     .filter(
       (candidate) =>
-        candidate.language === "js-ts" && candidate.confidence >= threshold,
+        candidate.language !== "unknown" && candidate.confidence >= threshold,
     )
     .map((candidate) => candidate.rootPath);
 
@@ -342,7 +433,7 @@ function selectCandidates(
       return candidate.confidence >= threshold;
     })
     .map((candidate): CandidateUnit => {
-      if (candidate.language !== "js-ts") {
+      if (candidate.language === "unknown") {
         return candidate;
       }
 
@@ -428,6 +519,20 @@ function buildPluginMatches(
     });
   }
 
+  if (candidate.language === "php") {
+    matches.push({
+      pluginId: "language:php",
+      pluginVersion: INTERNAL_PLUGIN_VERSION,
+      kind: "language-plugin",
+      matched: candidate.indexingMode === "full",
+      confidence: candidate.indexingMode === "full" ? 0.95 : 0.6,
+      reasons:
+        candidate.indexingMode === "full"
+          ? [`source-files:${sourceFiles.length}`]
+          : [`source-files:${sourceFiles.length}`, "pending-deep-indexing"],
+    });
+  }
+
   for (const framework of detectFrameworks(candidate)) {
     matches.push({
       pluginId: `framework:${framework}`,
@@ -442,7 +547,11 @@ function buildPluginMatches(
             ? signal.includes("nest")
             : framework === "prisma"
               ? signal.includes("prisma")
-              : true,
+              : framework === "laravel"
+                ? signal.includes("laravel")
+                : framework === "crudbooster"
+                  ? signal.includes("crudbooster")
+                  : true,
       ),
     });
   }
@@ -454,7 +563,12 @@ function detectFrameworks(candidate: CandidateUnit): string[] {
   const deps = {
     ...candidate.packageManifest?.dependencies,
     ...candidate.packageManifest?.devDependencies,
+    ...candidate.packageManifest?.require,
+    ...candidate.packageManifest?.["require-dev"],
   };
+  const allowHintOnlyMatch =
+    candidate.kind === "app" || candidate.kind === "service";
+  const hasSignal = (signal: string) => candidate.signals.includes(signal);
 
   const frameworks = new Set<string>();
   if (deps.express) {
@@ -466,39 +580,60 @@ function detectFrameworks(candidate: CandidateUnit): string[] {
   ) {
     frameworks.add("fastify");
   }
-  if (
-    deps.next ||
-    candidate.signals.some((signal) => signal.includes("next-config"))
-  ) {
+  if (deps.next || hasSignal("next-config")) {
     frameworks.add("next");
   }
   if (
     deps["@nestjs/common"] ||
     deps["@nestjs/core"] ||
-    candidate.signals.some((signal) => signal.includes("nest-config")) ||
-    candidate.frameworkHints.includes("nest")
+    hasSignal("nest-config") ||
+    (allowHintOnlyMatch && candidate.frameworkHints.includes("nest"))
   ) {
     frameworks.add("nest");
   }
-  if (candidate.frameworkHints.includes("express")) {
+  if (allowHintOnlyMatch && candidate.frameworkHints.includes("express")) {
     frameworks.add("express");
   }
-  if (candidate.frameworkHints.includes("fastify")) {
+  if (allowHintOnlyMatch && candidate.frameworkHints.includes("fastify")) {
     frameworks.add("fastify");
   }
-  if (candidate.frameworkHints.includes("next")) {
+  if (allowHintOnlyMatch && candidate.frameworkHints.includes("next")) {
     frameworks.add("next");
   }
   if (
     deps.prisma ||
     deps["@prisma/client"] ||
-    candidate.signals.some((signal) => signal.includes("prisma")) ||
-    candidate.frameworkHints.includes("prisma")
+    hasSignal("prisma-schema") ||
+    (allowHintOnlyMatch && candidate.frameworkHints.includes("prisma"))
   ) {
     frameworks.add("prisma");
   }
-  if (deps["drizzle-orm"] || candidate.frameworkHints.includes("drizzle")) {
+  if (
+    deps["drizzle-orm"] ||
+    (allowHintOnlyMatch && candidate.frameworkHints.includes("drizzle"))
+  ) {
     frameworks.add("drizzle");
+  }
+  if (
+    candidate.language === "php" &&
+    detectLaravelFramework({
+      rootPath: candidate.rootPath,
+      deps,
+      markerPaths: candidate.markerPaths,
+      sourceFiles: candidate.sourceFiles,
+    })
+  ) {
+    frameworks.add("laravel");
+  }
+  if (
+    candidate.language === "php" &&
+    frameworks.has("laravel") &&
+    detectCrudBoosterFramework({
+      deps,
+      signals: candidate.signals,
+    })
+  ) {
+    frameworks.add("crudbooster");
   }
 
   return [...frameworks];
@@ -550,6 +685,9 @@ function detectTooling(markerPaths: Set<string>): string {
   }
   if ([...markerPaths].some((path) => path.endsWith("pyproject.toml"))) {
     return "python";
+  }
+  if ([...markerPaths].some((path) => path.endsWith("composer.json"))) {
+    return "php";
   }
   return "unknown";
 }

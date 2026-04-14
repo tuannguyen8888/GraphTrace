@@ -19,6 +19,17 @@ const nestFixtureRoot = join(
   "nest-drizzle-workspace",
 );
 const fastifyFixtureRoot = join(process.cwd(), "fixtures", "fastify-workspace");
+const laravelResourceFixtureRoot = join(
+  process.cwd(),
+  "fixtures",
+  "laravel-resource-workspace",
+);
+const laravelFixtureRoot = join(process.cwd(), "fixtures", "laravel-workspace");
+const crudboosterLegacyFixtureRoot = join(
+  process.cwd(),
+  "fixtures",
+  "crudbooster-legacy-workspace",
+);
 const selfHostRoot = process.cwd();
 
 describe("query engine", () => {
@@ -203,6 +214,167 @@ describe("query engine", () => {
       nextStore.close();
       nestStore.close();
       fastifyStore.close();
+    }
+  });
+
+  test("lists laravel routes extracted from explicit, grouped, and resource helpers", async () => {
+    await ensureWorkspaceInitialized(laravelResourceFixtureRoot);
+    await indexWorkspace({
+      workspaceRoot: laravelResourceFixtureRoot,
+      full: true,
+    });
+
+    const store = openGraphStore(
+      join(laravelResourceFixtureRoot, ".graphtrace", "index.db"),
+    );
+
+    try {
+      const routes = createQueryEngine(store).routes();
+
+      expect(routes.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            framework: "laravel",
+            path: "/admin/users",
+            method: "GET",
+          }),
+          expect.objectContaining({
+            framework: "laravel",
+            path: "/posts",
+            method: "GET",
+          }),
+          expect.objectContaining({
+            framework: "laravel",
+            path: "/teams/{team}",
+            method: "GET",
+          }),
+        ]),
+      );
+    } finally {
+      store.close();
+    }
+  });
+
+  test("exposes laravel execution context from route handler symbol through query sinks", async () => {
+    await ensureWorkspaceInitialized(laravelFixtureRoot);
+    await indexWorkspace({ workspaceRoot: laravelFixtureRoot, full: true });
+
+    const store = openGraphStore(
+      join(laravelFixtureRoot, ".graphtrace", "index.db"),
+    );
+
+    try {
+      const queryEngine = createQueryEngine(store);
+      const execution = queryEngine.executionContextFromSymbol({
+        symbolId:
+          "symbol:app/Http/Controllers/UserController.php#UserController.index",
+      });
+      const flow = queryEngine.flow("GET /users");
+
+      expect(execution.graph?.nodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "GET /users",
+            kind: "route",
+          }),
+          expect.objectContaining({
+            id: "symbol:app/Services/UserService.php#UserService.listUsers",
+            kind: "symbol",
+          }),
+          expect.objectContaining({
+            kind: "query",
+            id: expect.stringContaining(
+              "User::query()->where('active', true)->get(",
+            ),
+          }),
+        ]),
+      );
+      expect(execution.graph?.edges).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "routes_to",
+            sourceId: "GET /users",
+            targetId:
+              "symbol:app/Http/Controllers/UserController.php#UserController.index",
+          }),
+          expect.objectContaining({
+            type: "calls",
+            sourceId:
+              "symbol:app/Http/Controllers/UserController.php#UserController.index",
+            targetId:
+              "symbol:app/Services/UserService.php#UserService.listUsers",
+          }),
+          expect.objectContaining({
+            type: "queries",
+            sourceId:
+              "symbol:app/Services/UserService.php#UserService.listUsers",
+            targetId: expect.stringContaining(
+              "User::query()->where('active', true)->get(",
+            ),
+          }),
+        ]),
+      );
+      expect(flow.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: "query",
+            id: expect.stringContaining(
+              "User::query()->where('active', true)->get(",
+            ),
+          }),
+        ]),
+      );
+    } finally {
+      store.close();
+    }
+  });
+
+  test("surfaces crudbooster roles and admin route flow through generic query APIs", async () => {
+    await ensureWorkspaceInitialized(crudboosterLegacyFixtureRoot);
+    await indexWorkspace({
+      workspaceRoot: crudboosterLegacyFixtureRoot,
+      full: true,
+    });
+
+    const store = openGraphStore(
+      join(crudboosterLegacyFixtureRoot, ".graphtrace", "index.db"),
+    );
+
+    try {
+      const queryEngine = createQueryEngine(store);
+      const modules = queryEngine.searchSymbols("AdminUsersController");
+      const action = queryEngine.getSymbol({
+        symbolId:
+          "symbol:app/Http/Controllers/AdminUsersController.php#AdminUsersController.getIndex",
+      });
+      const flow = queryEngine.flow("GET /admin/users");
+
+      expect(modules.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "symbol:app/Http/Controllers/AdminUsersController.php#AdminUsersController",
+            frameworkRole: "crudbooster-module",
+          }),
+        ]),
+      );
+      expect(action.items).toEqual([
+        expect.objectContaining({
+          id: "symbol:app/Http/Controllers/AdminUsersController.php#AdminUsersController.getIndex",
+          frameworkRole: "crudbooster-action",
+        }),
+      ]);
+      expect(flow.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: "query",
+            id: expect.stringContaining(
+              "User::query()->where('active', 1)->get(",
+            ),
+          }),
+        ]),
+      );
+    } finally {
+      store.close();
     }
   });
 

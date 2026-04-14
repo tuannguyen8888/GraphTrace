@@ -1,9 +1,12 @@
 import { join } from "node:path";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
-import { ensureWorkspaceInitialized } from "@graphtrace/config";
+import {
+  defaultGraphTraceConfig,
+  ensureWorkspaceInitialized,
+} from "@graphtrace/config";
 import { openGraphStore } from "@graphtrace/storage";
-import { indexWorkspace } from "../src/index";
+import { indexWorkspace, inspectWorkspace } from "../src/index";
 
 const fixtureRoot = join(process.cwd(), "fixtures", "express-prisma-workspace");
 const nextFixtureRoot = join(process.cwd(), "fixtures", "next-api-workspace");
@@ -33,6 +36,27 @@ const reactCallbackFixtureRoot = join(
   process.cwd(),
   "fixtures",
   "react-callback-workspace",
+);
+const phpBasicFixtureRoot = join(
+  process.cwd(),
+  "fixtures",
+  "php-basic-workspace",
+);
+const phpMixedFixtureRoot = join(
+  process.cwd(),
+  "fixtures",
+  "php-mixed-workspace",
+);
+const laravelFixtureRoot = join(process.cwd(), "fixtures", "laravel-workspace");
+const laravelResourceFixtureRoot = join(
+  process.cwd(),
+  "fixtures",
+  "laravel-resource-workspace",
+);
+const crudboosterLegacyFixtureRoot = join(
+  process.cwd(),
+  "fixtures",
+  "crudbooster-legacy-workspace",
 );
 
 describe("indexWorkspace", () => {
@@ -167,6 +191,11 @@ describe("indexWorkspace", () => {
     expect(result.units).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
+          rootPath: ".",
+          language: "js-ts",
+          indexingMode: "shallow",
+        }),
+        expect.objectContaining({
           rootPath: "services/api",
           language: "js-ts",
           indexingMode: "full",
@@ -178,6 +207,513 @@ describe("indexWorkspace", () => {
         }),
       ]),
     );
+  });
+
+  test("classifies PHP workspaces as php units and indexes them deeply", async () => {
+    await ensureWorkspaceInitialized(phpBasicFixtureRoot);
+
+    const result = await indexWorkspace({
+      workspaceRoot: phpBasicFixtureRoot,
+      full: true,
+    });
+
+    expect(result.units).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rootPath: ".",
+          language: "php",
+          indexingMode: "full",
+        }),
+      ]),
+    );
+    expect(result.summary.fileCount).toBeGreaterThanOrEqual(4);
+    expect(result.summary.symbolCount).toBeGreaterThanOrEqual(6);
+
+    const store = openGraphStore(
+      join(phpBasicFixtureRoot, ".graphtrace", "index.db"),
+    );
+
+    try {
+      expect(
+        store.symbolById(
+          "symbol:app/Http/Controllers/HealthController.php#HealthController",
+        ),
+      ).toMatchObject({
+        kind: "class",
+        language: "php",
+      });
+      expect(
+        store.symbolById(
+          "symbol:app/Http/Controllers/HealthController.php#HealthController.show",
+        ),
+      ).toMatchObject({
+        kind: "method",
+        ownerSymbolId:
+          "symbol:app/Http/Controllers/HealthController.php#HealthController",
+        ownerKind: "class",
+        language: "php",
+      });
+      expect(
+        store.symbolById("symbol:app/Contracts/ChecksHealth.php#ChecksHealth"),
+      ).toMatchObject({
+        kind: "interface",
+        language: "php",
+      });
+      expect(
+        store.symbolById("symbol:app/Support/TracksHealth.php#TracksHealth"),
+      ).toMatchObject({
+        kind: "trait",
+        language: "php",
+      });
+      expect(
+        store.symbolById("symbol:app/helpers.php#health_helper_message"),
+      ).toMatchObject({
+        kind: "function",
+        language: "php",
+      });
+    } finally {
+      store.close();
+    }
+  });
+
+  test("extracts php references and query hints while keeping mixed-language units stable", async () => {
+    await ensureWorkspaceInitialized(phpMixedFixtureRoot);
+
+    const result = await indexWorkspace({
+      workspaceRoot: phpMixedFixtureRoot,
+      full: true,
+    });
+
+    expect(result.units).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rootPath: "backend/api",
+          language: "php",
+          indexingMode: "full",
+        }),
+        expect.objectContaining({
+          rootPath: "frontend",
+          language: "js-ts",
+          indexingMode: "full",
+        }),
+      ]),
+    );
+    expect(result.summary.queryEdgeCount).toBeGreaterThanOrEqual(1);
+
+    const store = openGraphStore(
+      join(phpMixedFixtureRoot, ".graphtrace", "index.db"),
+    );
+
+    try {
+      expect(
+        store.fileDependencies(
+          "backend/api/app/Services/UserService.php",
+          "out",
+          1,
+        ).items,
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: "backend/api/app/Models/User.php",
+          }),
+          expect.objectContaining({
+            path: "backend/api/app/Support/HealthReporter.php",
+          }),
+        ]),
+      );
+
+      expect(
+        store.symbolNeighbors(
+          "symbol:backend/api/app/Services/UserService.php#UserService.listActive",
+        ),
+      ).toMatchObject({
+        edges: expect.arrayContaining([
+          expect.objectContaining({
+            type: "calls",
+            sourceId:
+              "symbol:backend/api/app/Services/UserService.php#UserService.listActive",
+            targetId:
+              "symbol:backend/api/app/Support/HealthReporter.php#HealthReporter.record",
+          }),
+          expect.objectContaining({
+            type: "calls",
+            sourceId:
+              "symbol:backend/api/app/Services/UserService.php#UserService.listActive",
+            targetId: "symbol:backend/api/app/Models/User.php#User.query",
+          }),
+        ]),
+      });
+
+      expect(
+        store.symbolNeighbors("symbol:backend/api/app/Models/User.php#User"),
+      ).toMatchObject({
+        edges: expect.arrayContaining([
+          expect.objectContaining({
+            type: "references",
+            sourceId: "symbol:backend/api/app/Models/User.php#User",
+            targetId: "symbol:backend/api/app/Models/BaseModel.php#BaseModel",
+          }),
+        ]),
+      });
+    } finally {
+      store.close();
+    }
+  });
+
+  test("detects laravel units with strong project signals", async () => {
+    await ensureWorkspaceInitialized(laravelFixtureRoot);
+    await ensureWorkspaceInitialized(phpBasicFixtureRoot);
+    await ensureWorkspaceInitialized(phpMixedFixtureRoot);
+
+    const laravelResult = await indexWorkspace({
+      workspaceRoot: laravelFixtureRoot,
+      full: true,
+    });
+    const plainPhpResult = await indexWorkspace({
+      workspaceRoot: phpBasicFixtureRoot,
+      full: true,
+    });
+    const mixedResult = await indexWorkspace({
+      workspaceRoot: phpMixedFixtureRoot,
+      full: true,
+    });
+
+    expect(laravelResult.units).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rootPath: ".",
+          language: "php",
+          pluginMatches: expect.arrayContaining([
+            expect.objectContaining({
+              pluginId: "framework:laravel",
+              kind: "framework-plugin",
+            }),
+          ]),
+        }),
+      ]),
+    );
+    expect(plainPhpResult.units).toEqual(
+      expect.not.arrayContaining([
+        expect.objectContaining({
+          pluginMatches: expect.arrayContaining([
+            expect.objectContaining({
+              pluginId: "framework:laravel",
+            }),
+          ]),
+        }),
+      ]),
+    );
+    expect(mixedResult.units).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rootPath: "backend/api",
+          language: "php",
+          pluginMatches: expect.not.arrayContaining([
+            expect.objectContaining({
+              pluginId: "framework:laravel",
+            }),
+          ]),
+        }),
+        expect.objectContaining({
+          rootPath: "frontend",
+          language: "js-ts",
+          indexingMode: "full",
+        }),
+      ]),
+    );
+  });
+
+  test("extracts laravel routes including grouped prefixes and resource helpers", async () => {
+    await ensureWorkspaceInitialized(laravelResourceFixtureRoot);
+
+    const result = await indexWorkspace({
+      workspaceRoot: laravelResourceFixtureRoot,
+      full: true,
+    });
+
+    expect(result.summary.routeCount).toBeGreaterThanOrEqual(14);
+
+    const store = openGraphStore(
+      join(laravelResourceFixtureRoot, ".graphtrace", "index.db"),
+    );
+
+    try {
+      expect(store.routeById("GET /admin/users")).toMatchObject({
+        framework: "laravel",
+        handlerSymbolId:
+          "symbol:app/Http/Controllers/UserController.php#UserController.index",
+      });
+      expect(store.routeById("POST /admin/users")).toMatchObject({
+        framework: "laravel",
+        handlerSymbolId:
+          "symbol:app/Http/Controllers/UserController.php#UserController.store",
+      });
+      expect(store.routeById("GET /posts")).toMatchObject({
+        framework: "laravel",
+        handlerSymbolId:
+          "symbol:app/Http/Controllers/PostController.php#PostController.index",
+      });
+      expect(store.routeById("POST /posts")).toMatchObject({
+        framework: "laravel",
+        handlerSymbolId:
+          "symbol:app/Http/Controllers/PostController.php#PostController.store",
+      });
+      expect(store.routeById("GET /teams/{team}")).toMatchObject({
+        framework: "laravel",
+        handlerSymbolId:
+          "symbol:app/Http/Controllers/TeamController.php#TeamController.show",
+      });
+    } finally {
+      store.close();
+    }
+  });
+
+  test("stitches laravel route handlers into execution context with downstream queries", async () => {
+    await ensureWorkspaceInitialized(laravelFixtureRoot);
+
+    await indexWorkspace({
+      workspaceRoot: laravelFixtureRoot,
+      full: true,
+    });
+
+    const store = openGraphStore(
+      join(laravelFixtureRoot, ".graphtrace", "index.db"),
+    );
+
+    try {
+      expect(
+        store.symbolNeighbors(
+          "symbol:app/Http/Controllers/UserController.php#UserController.index",
+        ),
+      ).toMatchObject({
+        edges: expect.arrayContaining([
+          expect.objectContaining({
+            type: "routes_to",
+            sourceId: "GET /users",
+            targetId:
+              "symbol:app/Http/Controllers/UserController.php#UserController.index",
+          }),
+          expect.objectContaining({
+            type: "calls",
+            sourceId:
+              "symbol:app/Http/Controllers/UserController.php#UserController.index",
+            targetId:
+              "symbol:app/Services/UserService.php#UserService.listUsers",
+          }),
+        ]),
+      });
+
+      expect(
+        store.executionContextFromSymbol(
+          "symbol:app/Http/Controllers/UserController.php#UserController.index",
+        ),
+      ).toMatchObject({
+        nodes: expect.arrayContaining([
+          expect.objectContaining({
+            id: "GET /users",
+            kind: "route",
+          }),
+          expect.objectContaining({
+            id: "symbol:app/Services/UserService.php#UserService.listUsers",
+            kind: "symbol",
+          }),
+          expect.objectContaining({
+            kind: "query",
+            id: expect.stringContaining(
+              "User::query()->where('active', true)->get(",
+            ),
+          }),
+        ]),
+        edges: expect.arrayContaining([
+          expect.objectContaining({
+            type: "queries",
+            sourceId:
+              "symbol:app/Services/UserService.php#UserService.listUsers",
+            targetId: expect.stringContaining(
+              "User::query()->where('active', true)->get(",
+            ),
+          }),
+        ]),
+      });
+    } finally {
+      store.close();
+    }
+  });
+
+  test("detects legacy crudbooster units without overmatching plain laravel fixtures", async () => {
+    await ensureWorkspaceInitialized(crudboosterLegacyFixtureRoot);
+    await ensureWorkspaceInitialized(laravelFixtureRoot);
+
+    const crudboosterResult = await indexWorkspace({
+      workspaceRoot: crudboosterLegacyFixtureRoot,
+      full: true,
+    });
+    const laravelResult = await indexWorkspace({
+      workspaceRoot: laravelFixtureRoot,
+      full: true,
+    });
+
+    expect(crudboosterResult.units).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rootPath: ".",
+          language: "php",
+          pluginMatches: expect.arrayContaining([
+            expect.objectContaining({
+              pluginId: "framework:laravel",
+            }),
+            expect.objectContaining({
+              pluginId: "framework:crudbooster",
+            }),
+          ]),
+        }),
+      ]),
+    );
+    expect(laravelResult.units).toEqual(
+      expect.not.arrayContaining([
+        expect.objectContaining({
+          pluginMatches: expect.arrayContaining([
+            expect.objectContaining({
+              pluginId: "framework:crudbooster",
+            }),
+          ]),
+        }),
+      ]),
+    );
+  });
+
+  test("extracts crudbooster module metadata, model bindings, and admin flows", async () => {
+    await ensureWorkspaceInitialized(crudboosterLegacyFixtureRoot);
+
+    await indexWorkspace({
+      workspaceRoot: crudboosterLegacyFixtureRoot,
+      full: true,
+    });
+
+    const store = openGraphStore(
+      join(crudboosterLegacyFixtureRoot, ".graphtrace", "index.db"),
+    );
+
+    try {
+      expect(
+        store.symbolById(
+          "symbol:app/Http/Controllers/AdminUsersController.php#AdminUsersController",
+        ),
+      ).toMatchObject({
+        frameworkRole: "crudbooster-module",
+      });
+      expect(
+        store.symbolById(
+          "symbol:app/Http/Controllers/AdminUsersController.php#AdminUsersController.cbInit",
+        ),
+      ).toMatchObject({
+        frameworkRole: "crudbooster-config",
+      });
+      expect(
+        store.symbolById(
+          "symbol:app/Http/Controllers/AdminUsersController.php#AdminUsersController.getIndex",
+        ),
+      ).toMatchObject({
+        frameworkRole: "crudbooster-action",
+      });
+      expect(store.routeById("GET /admin/users")).toMatchObject({
+        handlerSymbolId:
+          "symbol:app/Http/Controllers/AdminUsersController.php#AdminUsersController.getIndex",
+        framework: "laravel",
+      });
+      expect(
+        store.symbolNeighbors(
+          "symbol:app/Http/Controllers/AdminUsersController.php#AdminUsersController",
+        ),
+      ).toMatchObject({
+        edges: expect.arrayContaining([
+          expect.objectContaining({
+            type: "references",
+            sourceId:
+              "symbol:app/Http/Controllers/AdminUsersController.php#AdminUsersController",
+            targetId: "symbol:app/Models/User.php#User",
+            provenance: expect.objectContaining({
+              kind: "crudbooster-model-binding",
+            }),
+          }),
+        ]),
+      });
+      expect(
+        store.executionContextFromSymbol(
+          "symbol:app/Http/Controllers/AdminUsersController.php#AdminUsersController.getIndex",
+        ),
+      ).toMatchObject({
+        nodes: expect.arrayContaining([
+          expect.objectContaining({
+            id: "GET /admin/users",
+            kind: "route",
+          }),
+          expect.objectContaining({
+            id: "symbol:app/Models/User.php#User.query",
+            kind: "symbol",
+          }),
+          expect.objectContaining({
+            kind: "query",
+            id: expect.stringContaining(
+              "User::query()->where('active', 1)->get(",
+            ),
+          }),
+        ]),
+      });
+    } finally {
+      store.close();
+    }
+  });
+
+  test("does not match app frameworks on the self-host indexer package just because detector strings exist", async () => {
+    const inspection = await inspectWorkspace(
+      process.cwd(),
+      defaultGraphTraceConfig,
+    );
+
+    const indexerUnit = inspection.units.find(
+      (unit) => unit.rootPath === "packages/indexer",
+    );
+
+    expect(indexerUnit?.pluginMatches).toEqual(
+      expect.not.arrayContaining([
+        expect.objectContaining({
+          kind: "framework-plugin",
+        }),
+      ]),
+    );
+  });
+
+  test("delegates js-ts indexing through the language analyzer boundary", async () => {
+    const analyzeJsTsWorkspace = vi.fn().mockResolvedValue([]);
+    vi.resetModules();
+    vi.doMock("../src/languages/js-ts/analyzer", () => ({
+      analyzeJsTsWorkspace,
+    }));
+
+    try {
+      const { indexWorkspace: delegatedIndexWorkspace } = await import(
+        "../src/index"
+      );
+
+      await ensureWorkspaceInitialized(nextFixtureRoot);
+
+      await delegatedIndexWorkspace({
+        workspaceRoot: nextFixtureRoot,
+        full: true,
+      });
+
+      expect(analyzeJsTsWorkspace).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workspaceRoot: nextFixtureRoot,
+          allFiles: ["apps/web/src/app/api/users/route.ts"],
+          filesToIndex: ["apps/web/src/app/api/users/route.ts"],
+        }),
+      );
+    } finally {
+      vi.doUnmock("../src/languages/js-ts/analyzer");
+      vi.resetModules();
+    }
   });
 
   test("extracts stable callable symbols for ts and js fixtures", async () => {

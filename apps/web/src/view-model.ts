@@ -460,7 +460,7 @@ export function buildGraphTraceCommand(
 }
 
 export function looksLikeSourcePath(path?: string) {
-  return Boolean(path && /\.(ts|tsx|js|jsx)$/.test(path));
+  return Boolean(path && /\.(ts|tsx|js|jsx|php)$/.test(path));
 }
 
 function compareByScopeAndLabel(
