@@ -1,6 +1,6 @@
 {
   "name": "graphtrace",
-  "version": "1.6.2",
+  "version": "1.7.0",
   "description": "Local-first code graph for JS/TS projects with CLI, MCP, and local web UI.",
   "type": "module",
   "main": "./dist/index.js",

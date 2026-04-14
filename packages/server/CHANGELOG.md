@@ -1,5 +1,13 @@
 # @graphtrace/server
 
+## 1.7.0
+
+### Patch Changes
+
+- @graphtrace/query-engine@1.7.0
+- @graphtrace/shared@1.7.0
+- @graphtrace/storage@1.7.0
+
 ## 1.6.2
 
 ### Patch Changes

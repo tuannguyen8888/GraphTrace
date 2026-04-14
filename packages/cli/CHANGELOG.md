@@ -1,5 +1,11 @@
 # graphtrace
 
+## 1.7.0
+
+### Minor Changes
+
+- Add first-class PHP indexing for GraphTrace with Laravel route and flow extraction, CrudBooster module awareness, and stronger workspace detection for vendor-heavy Laravel repositories.
+
 ## 1.6.2
 
 ### Patch Changes
