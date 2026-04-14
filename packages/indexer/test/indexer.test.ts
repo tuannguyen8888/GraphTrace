@@ -68,6 +68,11 @@ const laravelVendorNoiseFixtureRoot = join(
   "fixtures",
   "laravel-vendor-noise-workspace",
 );
+const crudboosterRouteControllerFixtureRoot = join(
+  process.cwd(),
+  "fixtures",
+  "crudbooster-route-controller-workspace",
+);
 
 describe("indexWorkspace", () => {
   test("indexes packages, symbols, routes, and query edges from the fixture workspace", async () => {
@@ -771,6 +776,91 @@ describe("indexWorkspace", () => {
           }),
         ]),
       });
+    } finally {
+      store.close();
+    }
+  });
+
+  test("extracts crudbooster routeController conventions with prefixes and namespace overrides", async () => {
+    await ensureWorkspaceInitialized(crudboosterRouteControllerFixtureRoot);
+
+    const result = await indexWorkspace({
+      workspaceRoot: crudboosterRouteControllerFixtureRoot,
+      full: true,
+    });
+
+    expect(result.summary.routeCount).toBe(12);
+
+    const store = openGraphStore(
+      join(crudboosterRouteControllerFixtureRoot, ".graphtrace", "index.db"),
+    );
+
+    try {
+      expect(store.routeById("GET /")).toMatchObject({
+        framework: "laravel",
+        handlerSymbolId:
+          "symbol:app/Http/Controllers/PosController.php#PosController.getIndex",
+      });
+      expect(
+        store.routeById(
+          "GET /print-order/{one?}/{two?}/{three?}/{four?}/{five?}",
+        ),
+      ).toMatchObject({
+        framework: "laravel",
+        handlerSymbolId:
+          "symbol:app/Http/Controllers/PosController.php#PosController.getPrintOrder",
+      });
+      expect(
+        store.routeById(
+          "POST /submit-pos/{one?}/{two?}/{three?}/{four?}/{five?}",
+        ),
+      ).toMatchObject({
+        framework: "laravel",
+        handlerSymbolId:
+          "symbol:app/Http/Controllers/PosController.php#PosController.postSubmitPos",
+      });
+      expect(store.routeById("GET /admin/users")).toMatchObject({
+        framework: "laravel",
+        handlerSymbolId:
+          "symbol:app/Http/Controllers/AdminUsersController.php#AdminUsersController.getIndex",
+      });
+      expect(
+        store.routeById(
+          "GET /admin/users/add/{one?}/{two?}/{three?}/{four?}/{five?}",
+        ),
+      ).toMatchObject({
+        framework: "laravel",
+        handlerSymbolId:
+          "symbol:app/Http/Controllers/AdminUsersController.php#AdminUsersController.getAdd",
+      });
+      expect(
+        store.routeById(
+          "POST /admin/users/add-save/{one?}/{two?}/{three?}/{four?}/{five?}",
+        ),
+      ).toMatchObject({
+        framework: "laravel",
+        handlerSymbolId:
+          "symbol:app/Http/Controllers/AdminUsersController.php#AdminUsersController.postAddSave",
+      });
+      expect(store.routeById("GET /tools")).toMatchObject({
+        framework: "laravel",
+        handlerSymbolId:
+          "symbol:app/Http/Controllers/Admin/AuditController.php#AuditController.getIndex",
+      });
+      expect(
+        store.routeById(
+          "POST /tools/rebuild-cache/{one?}/{two?}/{three?}/{four?}/{five?}",
+        ),
+      ).toMatchObject({
+        framework: "laravel",
+        handlerSymbolId:
+          "symbol:app/Http/Controllers/Admin/AuditController.php#AuditController.postRebuildCache",
+      });
+      expect(
+        store.routeById(
+          "GET /admin/users/hidden/{one?}/{two?}/{three?}/{four?}/{five?}",
+        ),
+      ).toBeNull();
     } finally {
       store.close();
     }
