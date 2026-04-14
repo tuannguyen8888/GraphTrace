@@ -3,8 +3,12 @@ import type { PhpSymbolIndex } from "../../../languages/php/extract-references";
 
 const EXPLICIT_ROUTE_PATTERN =
   /Route::(get|post|put|patch|delete)\(\s*['"]([^'"]+)['"]\s*,\s*\[([A-Za-z0-9_\\]+)::class,\s*['"]([A-Za-z0-9_]+)['"]\]\s*\)/g;
+const STRING_CONTROLLER_ROUTE_PATTERN =
+  /Route::(get|post|put|patch|delete)\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+?)@([A-Za-z0-9_]+)['"]\s*\)/g;
 const PREFIX_GROUP_PATTERN =
   /Route::prefix\(\s*['"]([^'"]+)['"]\s*\)->group\(function\s*\([^)]*\)\s*\{([\s\S]*?)\}\s*\);/g;
+const LEGACY_PREFIX_GROUP_PATTERN =
+  /Route::group\(\s*(?:array\s*\()?\s*([\s\S]*?)\s*(?:\)\s*)?,\s*function\s*\([^)]*\)\s*\{([\s\S]*?)\}\s*\);/g;
 const RESOURCE_ROUTE_PATTERN =
   /Route::(apiResource|resource)\(\s*['"]([^'"]+)['"]\s*,\s*([A-Za-z0-9_\\]+)::class/g;
 
@@ -50,7 +54,43 @@ function extractRouteBlock(options: {
     remaining = remaining.replace(match[0], "");
   }
 
+  for (const match of remaining.matchAll(LEGACY_PREFIX_GROUP_PATTERN)) {
+    const prefix = readLegacyGroupPrefix(match[1]);
+    if (!prefix) {
+      continue;
+    }
+
+    const nextPrefix = joinRoutePath(options.prefix, prefix);
+    routes.push(
+      ...extractRouteBlock({
+        ...options,
+        sourceText: match[2],
+        prefix: nextPrefix,
+      }),
+    );
+    remaining = remaining.replace(match[0], "");
+  }
+
   for (const match of remaining.matchAll(EXPLICIT_ROUTE_PATTERN)) {
+    const method = match[1].toUpperCase();
+    const path = joinRoutePath(options.prefix, match[2]);
+    const controllerName = resolveControllerClass(match[3], options.aliases);
+    const action = match[4];
+
+    routes.push(
+      buildRouteItem({
+        method,
+        path,
+        controllerName,
+        action,
+        filePath: options.filePath,
+        unitId: options.unitId,
+        symbolIndex: options.symbolIndex,
+      }),
+    );
+  }
+
+  for (const match of remaining.matchAll(STRING_CONTROLLER_ROUTE_PATTERN)) {
     const method = match[1].toUpperCase();
     const path = joinRoutePath(options.prefix, match[2]);
     const controllerName = resolveControllerClass(match[3], options.aliases);
@@ -156,7 +196,7 @@ function buildRouteItem(options: {
     handlerName: `${shortName}@${options.action}`,
     handlerSymbolId:
       handlerSymbolId ??
-      `symbol:app/Http/Controllers/${shortName}.php#${shortName}.${options.action}`,
+      `symbol:${controllerClassToFilePath(options.controllerName)}#${shortName}.${options.action}`,
     filePath: options.filePath,
     framework: "laravel",
     unitId: options.unitId,
@@ -192,6 +232,9 @@ function resolveControllerClass(
         rest.length > 0 ? `${alias}\\${rest.join("\\")}` : alias,
       );
     }
+    if (!normalized.startsWith("App\\")) {
+      return `App\\Http\\Controllers\\${normalized}`;
+    }
     return normalized;
   }
 
@@ -217,7 +260,15 @@ function singularize(value: string): string {
 }
 
 function normalizeQualifiedName(name: string): string {
-  return name.replace(/^\\+/, "");
+  return name.replace(/^\\+/, "").replace(/\\+/g, "\\");
+}
+
+function controllerClassToFilePath(controllerName: string): string {
+  const normalized = normalizeQualifiedName(controllerName).replace(
+    /^App\\Http\\Controllers\\/,
+    "",
+  );
+  return `app/Http/Controllers/${normalized.replaceAll("\\", "/")}.php`;
 }
 
 function dedupeRoutes(routes: RouteItem[]): RouteItem[] {
@@ -230,6 +281,13 @@ function dedupeRoutes(routes: RouteItem[]): RouteItem[] {
     seen.add(key);
     return true;
   });
+}
+
+function readLegacyGroupPrefix(groupOptions: string): string | null {
+  const prefixMatch = groupOptions.match(
+    /['"]prefix['"]\s*=>\s*['"]([^'"]+)['"]/,
+  );
+  return prefixMatch?.[1] ?? null;
 }
 
 function buildProvenance(): PluginProvenance {

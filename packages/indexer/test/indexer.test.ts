@@ -53,10 +53,20 @@ const laravelResourceFixtureRoot = join(
   "fixtures",
   "laravel-resource-workspace",
 );
+const laravelLegacyRoutesFixtureRoot = join(
+  process.cwd(),
+  "fixtures",
+  "laravel-legacy-routes-workspace",
+);
 const crudboosterLegacyFixtureRoot = join(
   process.cwd(),
   "fixtures",
   "crudbooster-legacy-workspace",
+);
+const laravelVendorNoiseFixtureRoot = join(
+  process.cwd(),
+  "fixtures",
+  "laravel-vendor-noise-workspace",
 );
 
 describe("indexWorkspace", () => {
@@ -468,6 +478,46 @@ describe("indexWorkspace", () => {
     }
   });
 
+  test("extracts legacy laravel string controller syntax and array prefix groups", async () => {
+    await ensureWorkspaceInitialized(laravelLegacyRoutesFixtureRoot);
+
+    const result = await indexWorkspace({
+      workspaceRoot: laravelLegacyRoutesFixtureRoot,
+      full: true,
+    });
+
+    expect(result.summary.routeCount).toBe(4);
+
+    const store = openGraphStore(
+      join(laravelLegacyRoutesFixtureRoot, ".graphtrace", "index.db"),
+    );
+
+    try {
+      expect(store.routeById("GET /zalo-login")).toMatchObject({
+        framework: "laravel",
+        handlerSymbolId:
+          "symbol:app/Http/Controllers/ZaloController.php#ZaloController.login",
+      });
+      expect(store.routeById("GET /info-pawn-order-customers")).toMatchObject({
+        framework: "laravel",
+        handlerSymbolId:
+          "symbol:app/Http/Controllers/Api/GoldPawnOrderController.php#GoldPawnOrderController.cronjobSendNoticeInterestPayment",
+      });
+      expect(store.routeById("GET /admin/reports")).toMatchObject({
+        framework: "laravel",
+        handlerSymbolId:
+          "symbol:app/Http/Controllers/AdminReportController.php#AdminReportController.index",
+      });
+      expect(store.routeById("POST /admin/reports/export")).toMatchObject({
+        framework: "laravel",
+        handlerSymbolId:
+          "symbol:app/Http/Controllers/AdminReportController.php#AdminReportController.export",
+      });
+    } finally {
+      store.close();
+    }
+  });
+
   test("stitches laravel route handlers into execution context with downstream queries", async () => {
     await ensureWorkspaceInitialized(laravelFixtureRoot);
 
@@ -580,6 +630,67 @@ describe("indexWorkspace", () => {
         }),
       ]),
     );
+  });
+
+  test("prefers laravel root classification over vendor and frontend noise", async () => {
+    await ensureWorkspaceInitialized(laravelVendorNoiseFixtureRoot);
+
+    const inspection = await inspectWorkspace(
+      laravelVendorNoiseFixtureRoot,
+      defaultGraphTraceConfig,
+    );
+    const result = await indexWorkspace({
+      workspaceRoot: laravelVendorNoiseFixtureRoot,
+      full: true,
+    });
+
+    const rootUnit = inspection.units.find((unit) => unit.rootPath === ".");
+    const rootUnitFiles = inspection.unitFiles.get("unit:root") ?? [];
+
+    expect(rootUnit).toMatchObject({
+      rootPath: ".",
+      language: "php",
+      tooling: "php",
+      indexingMode: "full",
+      sourceRoots: expect.arrayContaining(["app", "bootstrap", "routes"]),
+      pluginMatches: expect.arrayContaining([
+        expect.objectContaining({
+          pluginId: "framework:laravel",
+        }),
+        expect.objectContaining({
+          pluginId: "framework:crudbooster",
+        }),
+      ]),
+    });
+    expect(rootUnit?.sourceRoots).toEqual(
+      expect.not.arrayContaining(["public", "vendor"]),
+    );
+    expect(rootUnitFiles).toEqual(
+      expect.not.arrayContaining([
+        expect.stringContaining("public/vendor/"),
+        expect.stringContaining("vendor/"),
+      ]),
+    );
+    expect(result.summary.routeCount).toBe(1);
+
+    const store = openGraphStore(
+      join(laravelVendorNoiseFixtureRoot, ".graphtrace", "index.db"),
+    );
+
+    try {
+      expect(store.routeById("GET /users")).toMatchObject({
+        framework: "laravel",
+        handlerSymbolId:
+          "symbol:app/Http/Controllers/UserController.php#UserController.index",
+      });
+      expect(
+        store.symbolById(
+          "symbol:vendor/crocodicstudio/crudbooster/src/CBController.php#CBController",
+        ),
+      ).toBeNull();
+    } finally {
+      store.close();
+    }
   });
 
   test("extracts crudbooster module metadata, model bindings, and admin flows", async () => {
