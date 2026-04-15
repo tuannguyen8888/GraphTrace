@@ -13,4 +13,11 @@ class UserService
 
         return User::query()->where('active', true)->get();
     }
+
+    public function calculateWithService(): int
+    {
+        $service = new PurchaseDebtCalculationService();
+
+        return $service->calculatePurchaseAmount();
+    }
 }

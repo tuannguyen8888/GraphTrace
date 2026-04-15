@@ -125,9 +125,9 @@ export class GraphStore {
     ).map((row) => row.id);
     const routeIds = (
       this.db
-        .prepare("SELECT id FROM routes WHERE file_path = ?")
-        .all(normalizedPath) as Array<{ id: string }>
-    ).map((row) => row.id);
+        .prepare("SELECT storage_id FROM routes WHERE file_path = ?")
+        .all(normalizedPath) as Array<{ storage_id: string }>
+    ).map((row) => row.storage_id);
 
     this.db.prepare("DELETE FROM fts_content WHERE id = ?").run(fileId);
     for (const symbolId of symbolIds) {
@@ -527,7 +527,7 @@ export class GraphStore {
       );
     this.upsertSearchEntry({
       kind: "route",
-      id: record.id,
+      id: storageId,
       text: `${record.method} ${record.path} ${record.handlerName}`,
       path: record.filePath,
     });
@@ -641,7 +641,7 @@ export class GraphStore {
 
     return {
       items: rows.map((row, index) => ({
-        id: row.id,
+        id: row.kind === "route" ? canonicalRouteId(row.id) : row.id,
         kind: row.kind,
         label: row.text,
         path: row.path ?? undefined,
@@ -704,12 +704,23 @@ export class GraphStore {
 
   routeById(routeId: string): RouteItem | null {
     const row = this.db
-      .prepare("SELECT * FROM routes WHERE id = ? ORDER BY file_path LIMIT 1")
-      .get(routeId) as RouteRow | undefined;
+      .prepare(
+        "SELECT * FROM routes WHERE storage_id = ? OR id = ? ORDER BY CASE WHEN storage_id = ? THEN 0 ELSE 1 END, file_path LIMIT 1",
+      )
+      .get(routeId, routeId, routeId) as RouteRow | undefined;
     if (!row) {
       return null;
     }
     return this.mapRouteRow(row);
+  }
+
+  routesMatchingId(routeId: string): RouteItem[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM routes WHERE storage_id = ? OR id = ? ORDER BY file_path",
+      )
+      .all(routeId, routeId) as unknown as RouteRow[];
+    return rows.map((row) => this.mapRouteRow(row));
   }
 
   symbolNeighbors(symbolId: string): GraphEnvelope {
@@ -1153,12 +1164,18 @@ export class GraphStore {
   }
 
   flowFromRoute(routeId: string, maxDepth = 6): QueryResult<GraphItem> {
-    const route = this.routeById(routeId);
-    if (!route) {
+    const routes = this.routesMatchingId(routeId);
+    if (routes.length === 0) {
       return { items: [] };
     }
 
-    return this.flowFromRouteItem(route, maxDepth);
+    if (routes.length === 1) {
+      return this.flowFromRouteItem(routes[0], maxDepth);
+    }
+
+    return mergeGraphItemResults(
+      routes.map((route) => this.flowFromRouteItem(route, maxDepth)),
+    );
   }
 
   private flowFromRouteItem(
@@ -1246,16 +1263,23 @@ export class GraphStore {
     routeId: string,
     maxDepth = 6,
   ): QueryResult<GraphItem> {
-    const route = this.routesByRepository(repositoryId).items.find(
-      (entry) => entry.id === routeId,
+    const routes = this.routesByRepository(repositoryId).items.filter(
+      (entry) =>
+        entry.id === routeId ||
+        routeStorageId(entry.id, entry.filePath) === routeId,
     );
-    if (!route) {
+    if (routes.length === 0) {
       return { items: [] };
     }
-    return this.filterGraphItemsByRepository(
-      repositoryId,
-      this.flowFromRouteItem(route, maxDepth),
-    );
+
+    const result =
+      routes.length === 1
+        ? this.flowFromRouteItem(routes[0], maxDepth)
+        : mergeGraphItemResults(
+            routes.map((route) => this.flowFromRouteItem(route, maxDepth)),
+          );
+
+    return this.filterGraphItemsByRepository(repositoryId, result);
   }
 
   packageOverview(): QueryResult<GraphItem> {
@@ -1550,6 +1574,27 @@ function symbolSpanSize(symbol: SymbolDescriptor): number {
 
 function routeStorageId(routeId: string, filePath: string): string {
   return `${routeId}::${filePath}`;
+}
+
+function canonicalRouteId(routeLookupId: string): string {
+  return routeLookupId.split("::", 1)[0] ?? routeLookupId;
+}
+
+function mergeGraphItemResults(
+  results: Array<QueryResult<GraphItem>>,
+): QueryResult<GraphItem> {
+  const items = new Map<string, GraphItem>();
+
+  for (const result of results) {
+    for (const item of result.items) {
+      const key = `${item.kind}:${item.id}:${item.path ?? ""}`;
+      items.set(key, item);
+    }
+  }
+
+  return {
+    items: [...items.values()],
+  };
 }
 
 export * from "./workspace-paths";

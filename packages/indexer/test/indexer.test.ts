@@ -360,6 +360,22 @@ describe("indexWorkspace", () => {
       });
 
       expect(
+        store.symbolNeighbors(
+          "symbol:backend/api/app/Services/UserService.php#UserService.calculateWithService",
+        ),
+      ).toMatchObject({
+        edges: expect.arrayContaining([
+          expect.objectContaining({
+            type: "calls",
+            sourceId:
+              "symbol:backend/api/app/Services/UserService.php#UserService.calculateWithService",
+            targetId:
+              "symbol:backend/api/app/Services/PurchaseDebtCalculationService.php#PurchaseDebtCalculationService.calculatePurchaseAmount",
+          }),
+        ]),
+      });
+
+      expect(
         store.symbolNeighbors("symbol:backend/api/app/Models/User.php#User"),
       ).toMatchObject({
         edges: expect.arrayContaining([
@@ -491,7 +507,7 @@ describe("indexWorkspace", () => {
       full: true,
     });
 
-    expect(result.summary.routeCount).toBe(4);
+    expect(result.summary.routeCount).toBe(5);
 
     const store = openGraphStore(
       join(laravelLegacyRoutesFixtureRoot, ".graphtrace", "index.db"),
@@ -503,11 +519,41 @@ describe("indexWorkspace", () => {
         handlerSymbolId:
           "symbol:app/Http/Controllers/ZaloController.php#ZaloController.login",
       });
-      expect(store.routeById("GET /info-pawn-order-customers")).toMatchObject({
-        framework: "laravel",
-        handlerSymbolId:
-          "symbol:app/Http/Controllers/Api/GoldPawnOrderController.php#GoldPawnOrderController.cronjobSendNoticeInterestPayment",
-      });
+      expect(
+        store
+          .routes()
+          .items.filter(
+            (route) => route.id === "GET /info-pawn-order-customers",
+          ),
+      ).toHaveLength(2);
+      expect(store.search("info-pawn-order-customers", "route").items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: "routes/web.php",
+          }),
+          expect.objectContaining({
+            path: "routes/api.php",
+          }),
+        ]),
+      );
+      expect(
+        store.flowFromRoute("GET /info-pawn-order-customers").items,
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: "routes/web.php",
+          }),
+          expect.objectContaining({
+            path: "routes/api.php",
+          }),
+          expect.objectContaining({
+            path: "app/Http/Controllers/Api/GoldPawnOrderController.php",
+          }),
+          expect.objectContaining({
+            path: "app/Http/Controllers/ZaloController.php",
+          }),
+        ]),
+      );
       expect(store.routeById("GET /admin/reports")).toMatchObject({
         framework: "laravel",
         handlerSymbolId:
@@ -517,6 +563,36 @@ describe("indexWorkspace", () => {
         framework: "laravel",
         handlerSymbolId:
           "symbol:app/Http/Controllers/AdminReportController.php#AdminReportController.export",
+      });
+    } finally {
+      store.close();
+    }
+  });
+
+  test("tracks laravel command registrations declared through class constants", async () => {
+    await ensureWorkspaceInitialized(laravelFixtureRoot);
+
+    await indexWorkspace({
+      workspaceRoot: laravelFixtureRoot,
+      full: true,
+    });
+
+    const store = openGraphStore(
+      join(laravelFixtureRoot, ".graphtrace", "index.db"),
+    );
+
+    try {
+      expect(
+        store.symbolNeighbors("symbol:app/Console/Kernel.php#Kernel"),
+      ).toMatchObject({
+        edges: expect.arrayContaining([
+          expect.objectContaining({
+            type: "references",
+            sourceId: "symbol:app/Console/Kernel.php#Kernel",
+            targetId:
+              "symbol:app/Console/Commands/ForceSyncTableCommand.php#ForceSyncTableCommand",
+          }),
+        ]),
       });
     } finally {
       store.close();
