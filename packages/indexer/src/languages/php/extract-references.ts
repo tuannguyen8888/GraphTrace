@@ -25,6 +25,8 @@ interface PhpDeclaration {
   fqn?: string;
 }
 
+type VariableTypeMap = Map<string, string>;
+
 export interface PhpSymbolIndex {
   classLikeByFqn: Map<string, PhpDeclaration>;
   functionByFqn: Map<string, PhpDeclaration>;
@@ -170,6 +172,20 @@ export function extractPhpReferences(options: {
           }
 
           if (member.kind !== "method") {
+            const classEdges = collectScopedSymbolEdges({
+              rootNode: member,
+              sourceSymbolId: classSymbolId,
+              namespaceName,
+              useAliases: scopedAliases,
+              currentClassName: className,
+              currentClassFqn: classFqn,
+              extendsFqn,
+              symbolIndex: options.symbolIndex,
+              variableTypes: new Map(),
+            });
+            for (const edge of classEdges) {
+              symbolEdges.set(edge.id, edge);
+            }
             continue;
           }
 
@@ -182,30 +198,20 @@ export function extractPhpReferences(options: {
             options.filePath,
             `${className}.${methodName}`,
           );
-          const thisMethodAliases = new Map(scopedAliases);
-          const methodBody = member.body;
-
-          walkPhpAst(methodBody, (child) => {
-            if (child.kind !== "call") {
-              return;
-            }
-
-            const target = resolveCallTarget({
-              callNode: child,
-              namespaceName,
-              useAliases: thisMethodAliases,
-              currentClassName: className,
-              currentClassFqn: classFqn,
-              currentMethodSymbolId: methodSymbolId,
-              extendsFqn,
-              symbolIndex: options.symbolIndex,
-            });
-            if (!target) {
-              return;
-            }
-
-            symbolEdges.set(target.id, target);
+          const methodEdges = collectScopedSymbolEdges({
+            rootNode: member.body,
+            sourceSymbolId: methodSymbolId,
+            namespaceName,
+            useAliases: scopedAliases,
+            currentClassName: className,
+            currentClassFqn: classFqn,
+            extendsFqn,
+            symbolIndex: options.symbolIndex,
+            variableTypes: new Map(),
           });
+          for (const edge of methodEdges) {
+            symbolEdges.set(edge.id, edge);
+          }
         }
       }
     }
@@ -217,6 +223,80 @@ export function extractPhpReferences(options: {
     importEdges: dedupeImportEdges(importEdges),
     symbolEdges: [...symbolEdges.values()],
   };
+}
+
+function collectScopedSymbolEdges(options: {
+  rootNode: unknown;
+  sourceSymbolId: string;
+  namespaceName: string;
+  useAliases: Map<string, string>;
+  currentClassName: string;
+  currentClassFqn: string;
+  extendsFqn: string | null;
+  symbolIndex: PhpSymbolIndex;
+  variableTypes: VariableTypeMap;
+}): GraphEdgeDescriptor[] {
+  const edges = new Map<string, GraphEdgeDescriptor>();
+
+  walkPhpAst(options.rootNode, (child) => {
+    if (child.kind === "assign") {
+      recordAssignedVariableType({
+        assignNode: child,
+        namespaceName: options.namespaceName,
+        useAliases: options.useAliases,
+        symbolIndex: options.symbolIndex,
+        variableTypes: options.variableTypes,
+      });
+      return;
+    }
+
+    if (child.kind === "call") {
+      const target = resolveCallTarget({
+        callNode: child,
+        namespaceName: options.namespaceName,
+        useAliases: options.useAliases,
+        currentClassName: options.currentClassName,
+        currentClassFqn: options.currentClassFqn,
+        currentMethodSymbolId: options.sourceSymbolId,
+        extendsFqn: options.extendsFqn,
+        symbolIndex: options.symbolIndex,
+        variableTypes: options.variableTypes,
+      });
+      if (target) {
+        edges.set(target.id, target);
+      }
+      return;
+    }
+
+    if (child.kind === "staticlookup") {
+      const target = resolveClassConstantReference({
+        lookupNode: child,
+        sourceSymbolId: options.sourceSymbolId,
+        namespaceName: options.namespaceName,
+        useAliases: options.useAliases,
+        symbolIndex: options.symbolIndex,
+      });
+      if (target) {
+        edges.set(target.id, target);
+      }
+      return;
+    }
+
+    if (child.kind === "new") {
+      const target = resolveInstantiationReference({
+        newNode: child,
+        sourceSymbolId: options.sourceSymbolId,
+        namespaceName: options.namespaceName,
+        useAliases: options.useAliases,
+        symbolIndex: options.symbolIndex,
+      });
+      if (target) {
+        edges.set(target.id, target);
+      }
+    }
+  });
+
+  return [...edges.values()];
 }
 
 function collectPhpDeclarations(
@@ -351,6 +431,7 @@ function resolveCallTarget(options: {
   currentMethodSymbolId: string;
   extendsFqn: string | null;
   symbolIndex: PhpSymbolIndex;
+  variableTypes: VariableTypeMap;
 }): GraphEdgeDescriptor | null {
   const receiver = asPhpNode(options.callNode.what);
   if (!receiver) {
@@ -420,7 +501,132 @@ function resolveCallTarget(options: {
     );
   }
 
+  if (
+    receiver.kind === "propertylookup" &&
+    asPhpNode(receiver.what)?.kind === "variable"
+  ) {
+    const variableName = phpIdentifierName(asPhpNode(receiver.what)?.name);
+    const methodName = phpIdentifierName(receiver.offset);
+    const ownerSymbolId = variableName
+      ? options.variableTypes.get(variableName)
+      : undefined;
+    const target =
+      ownerSymbolId && methodName
+        ? options.symbolIndex.methodsByOwnerAndName.get(
+            `${ownerSymbolId}:${methodName}`,
+          )
+        : null;
+
+    if (!target) {
+      return null;
+    }
+
+    return buildSymbolEdge(
+      "calls",
+      options.currentMethodSymbolId,
+      target.symbolId,
+      "php-variable-call",
+      [variableName ?? "", methodName ?? ""].filter(Boolean),
+    );
+  }
+
   return null;
+}
+
+function recordAssignedVariableType(options: {
+  assignNode: PhpNode;
+  namespaceName: string;
+  useAliases: Map<string, string>;
+  symbolIndex: PhpSymbolIndex;
+  variableTypes: VariableTypeMap;
+}): void {
+  const left = asPhpNode(options.assignNode.left);
+  const right = asPhpNode(options.assignNode.right);
+  if (!left || !right || left.kind !== "variable" || right.kind !== "new") {
+    return;
+  }
+
+  const variableName = phpIdentifierName(left.name);
+  const classFqn = resolveName(
+    asPhpNode(right.what),
+    options.namespaceName,
+    options.useAliases,
+  );
+  if (!variableName || !classFqn) {
+    return;
+  }
+
+  const declaration = resolveClassLike(options.symbolIndex, classFqn);
+  if (!declaration) {
+    return;
+  }
+
+  options.variableTypes.set(variableName, declaration.symbolId);
+}
+
+function resolveClassConstantReference(options: {
+  lookupNode: PhpNode;
+  sourceSymbolId: string;
+  namespaceName: string;
+  useAliases: Map<string, string>;
+  symbolIndex: PhpSymbolIndex;
+}): GraphEdgeDescriptor | null {
+  const constantName = phpIdentifierName(options.lookupNode.offset);
+  if (constantName !== "class") {
+    return null;
+  }
+
+  const classFqn = resolveName(
+    options.lookupNode.what,
+    options.namespaceName,
+    options.useAliases,
+  );
+  if (!classFqn) {
+    return null;
+  }
+
+  const target = resolveClassLike(options.symbolIndex, classFqn);
+  if (!target) {
+    return null;
+  }
+
+  return buildSymbolEdge(
+    "references",
+    options.sourceSymbolId,
+    target.symbolId,
+    "php-class-constant",
+    [classFqn, "class"],
+  );
+}
+
+function resolveInstantiationReference(options: {
+  newNode: PhpNode;
+  sourceSymbolId: string;
+  namespaceName: string;
+  useAliases: Map<string, string>;
+  symbolIndex: PhpSymbolIndex;
+}): GraphEdgeDescriptor | null {
+  const classFqn = resolveName(
+    asPhpNode(options.newNode.what),
+    options.namespaceName,
+    options.useAliases,
+  );
+  if (!classFqn) {
+    return null;
+  }
+
+  const target = resolveClassLike(options.symbolIndex, classFqn);
+  if (!target) {
+    return null;
+  }
+
+  return buildSymbolEdge(
+    "references",
+    options.sourceSymbolId,
+    target.symbolId,
+    "php-instantiation",
+    [classFqn],
+  );
 }
 
 function addClassLikeEdge(
