@@ -329,6 +329,66 @@ describe("query engine", () => {
     }
   });
 
+  test("surfaces laravel command registrations through execution-context and impact queries", async () => {
+    await ensureWorkspaceInitialized(laravelFixtureRoot);
+    await indexWorkspace({ workspaceRoot: laravelFixtureRoot, full: true });
+
+    const store = openGraphStore(
+      join(laravelFixtureRoot, ".graphtrace", "index.db"),
+    );
+
+    try {
+      const queryEngine = createQueryEngine(store);
+      const execution = queryEngine.executionContextFromSymbol({
+        symbolId:
+          "symbol:app/Console/Commands/ForceSyncTableCommand.php#ForceSyncTableCommand",
+      });
+      const impact = queryEngine.impactFromSymbol({
+        symbolId:
+          "symbol:app/Console/Commands/ForceSyncTableCommand.php#ForceSyncTableCommand",
+      });
+
+      expect(execution.graph?.nodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "symbol:app/Console/Kernel.php#Kernel",
+            kind: "symbol",
+          }),
+        ]),
+      );
+      expect(execution.graph?.edges).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "references",
+            sourceId: "symbol:app/Console/Kernel.php#Kernel",
+            targetId:
+              "symbol:app/Console/Commands/ForceSyncTableCommand.php#ForceSyncTableCommand",
+          }),
+        ]),
+      );
+      expect(impact.graph?.nodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "symbol:app/Console/Kernel.php#Kernel",
+            kind: "symbol",
+          }),
+        ]),
+      );
+      expect(impact.graph?.edges).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "references",
+            sourceId: "symbol:app/Console/Kernel.php#Kernel",
+            targetId:
+              "symbol:app/Console/Commands/ForceSyncTableCommand.php#ForceSyncTableCommand",
+          }),
+        ]),
+      );
+    } finally {
+      store.close();
+    }
+  });
+
   test("surfaces crudbooster roles and admin route flow through generic query APIs", async () => {
     await ensureWorkspaceInitialized(crudboosterLegacyFixtureRoot);
     await indexWorkspace({
