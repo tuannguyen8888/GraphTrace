@@ -500,4 +500,100 @@ describe("storage", () => {
       store.close();
     }
   });
+
+  test("includes reference edges in execution-context and impact graphs", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "graphtrace-storage-"));
+    const store = openGraphStore(
+      join(workspaceRoot, ".graphtrace", "index.db"),
+    );
+
+    try {
+      store.upsertSymbol({
+        id: "symbol:app/Console/Kernel.php#Kernel",
+        name: "Kernel",
+        displayName: "Kernel",
+        kind: "class",
+        language: "php",
+        fileId: "file:app/Console/Kernel.php",
+        filePath: "app/Console/Kernel.php",
+        exported: true,
+      });
+      store.upsertSymbol({
+        id: "symbol:app/Console/Commands/ForceSyncTableCommand.php#ForceSyncTableCommand",
+        name: "ForceSyncTableCommand",
+        displayName: "ForceSyncTableCommand",
+        kind: "class",
+        language: "php",
+        fileId: "file:app/Console/Commands/ForceSyncTableCommand.php",
+        filePath: "app/Console/Commands/ForceSyncTableCommand.php",
+        exported: true,
+      });
+      store.upsertSymbolEdge({
+        id: "edge:references:symbol:app/Console/Kernel.php#Kernel->symbol:app/Console/Commands/ForceSyncTableCommand.php#ForceSyncTableCommand",
+        type: "references",
+        sourceId: "symbol:app/Console/Kernel.php#Kernel",
+        sourceKind: "symbol",
+        targetId:
+          "symbol:app/Console/Commands/ForceSyncTableCommand.php#ForceSyncTableCommand",
+        targetKind: "symbol",
+        confidence: 1,
+        confidenceLabel: "proven",
+        provenance: {
+          kind: "php-class-constant",
+          source: "php-parser",
+          evidence: ["ForceSyncTableCommand::class"],
+        },
+      });
+
+      expect(
+        store.executionContextFromSymbol(
+          "symbol:app/Console/Commands/ForceSyncTableCommand.php#ForceSyncTableCommand",
+          {
+            maxNodes: 10,
+            maxEdges: 10,
+          },
+        ),
+      ).toMatchObject({
+        nodes: expect.arrayContaining([
+          expect.objectContaining({
+            id: "symbol:app/Console/Kernel.php#Kernel",
+          }),
+        ]),
+        edges: expect.arrayContaining([
+          expect.objectContaining({
+            type: "references",
+            sourceId: "symbol:app/Console/Kernel.php#Kernel",
+            targetId:
+              "symbol:app/Console/Commands/ForceSyncTableCommand.php#ForceSyncTableCommand",
+          }),
+        ]),
+      });
+
+      expect(
+        store.impactFromSymbol(
+          "symbol:app/Console/Commands/ForceSyncTableCommand.php#ForceSyncTableCommand",
+          {
+            maxNodes: 10,
+            maxEdges: 10,
+          },
+        ),
+      ).toMatchObject({
+        nodes: expect.arrayContaining([
+          expect.objectContaining({
+            id: "symbol:app/Console/Kernel.php#Kernel",
+          }),
+        ]),
+        edges: expect.arrayContaining([
+          expect.objectContaining({
+            type: "references",
+            sourceId: "symbol:app/Console/Kernel.php#Kernel",
+            targetId:
+              "symbol:app/Console/Commands/ForceSyncTableCommand.php#ForceSyncTableCommand",
+          }),
+        ]),
+      });
+    } finally {
+      store.close();
+    }
+  });
 });
