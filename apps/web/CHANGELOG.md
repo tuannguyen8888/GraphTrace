@@ -1,5 +1,11 @@
 # @graphtrace/web
 
+## 1.7.2
+
+### Patch Changes
+
+- @graphtrace/shared@1.7.2
+
 ## 1.7.1
 
 ### Patch Changes

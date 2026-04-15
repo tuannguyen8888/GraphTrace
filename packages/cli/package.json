@@ -1,6 +1,6 @@
 {
   "name": "graphtrace",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "description": "Local-first code graph for JS/TS and PHP projects with CLI, MCP, and local web UI.",
   "type": "module",
   "main": "./dist/index.js",
@@ -12,7 +12,10 @@
   "bin": {
     "graphtrace": "./dist/bin.js"
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
