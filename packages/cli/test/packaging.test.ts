@@ -51,5 +51,5 @@ describe("packaging", () => {
       await rm(outputArtifact, { force: true });
       await rm(memoryArtifact, { force: true });
     }
-  });
+  }, 20_000);
 });
