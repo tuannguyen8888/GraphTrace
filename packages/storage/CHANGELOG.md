@@ -1,5 +1,11 @@
 # @graphtrace/storage
 
+## 1.7.1
+
+### Patch Changes
+
+- @graphtrace/shared@1.7.1
+
 ## 1.7.0
 
 ### Patch Changes

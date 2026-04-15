@@ -1,5 +1,11 @@
 # graphtrace
 
+## 1.7.1
+
+### Patch Changes
+
+- Improve PHP and Laravel graph reliability by preserving duplicate route ids across route files, tracking Artisan command registrations declared via `::class`, and following service-object method calls.
+
 ## 1.7.0
 
 ### Minor Changes

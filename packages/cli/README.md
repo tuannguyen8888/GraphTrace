@@ -1,6 +1,6 @@
 # graphtrace
 
-GraphTrace is a local-first code graph for JavaScript and TypeScript projects.
+GraphTrace is a local-first code graph for JavaScript, TypeScript, and PHP projects.
 
 It builds a local SQLite-backed graph, then exposes the same data through:
 
@@ -106,7 +106,8 @@ If the target tool asks for MCP approval or trust confirmation, approve GraphTra
 
 ## Notes
 
-- Supported focus for v1.0: JS/TS projects with dynamic unit discovery
-- Route discovery: Express, Fastify, Nest, Next App Router
-- Query hints: Prisma and Drizzle heuristics
+- Supported focus for v1.0: JS/TS plus PHP projects with dynamic unit discovery
+- Route discovery: Express, Fastify, Nest, Next App Router, and Laravel
+- PHP coverage: Laravel routing, CrudBooster route conventions, service-object calls, and Artisan command class registration
+- Query hints: Prisma, Drizzle, Eloquent-style chains, and `DB::table()` / `DB::query()` heuristics
 - Storage/runtime stays local by default

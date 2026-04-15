@@ -61,6 +61,7 @@ Current capabilities include:
 - route discovery for Express, Fastify, Nest, Next App Router, and Laravel
 - Laravel route extraction for explicit controller arrays, legacy string controllers, grouped prefixes, and resource helpers
 - CrudBooster detection, module/model awareness, and `CRUDBooster::routeController(...)` convention expansion
+- PHP symbol edges for Laravel command registration, service-object method calls, and duplicate route IDs across route files
 - query hints for Prisma, Drizzle, Eloquent-style `Model::query()` chains, and `DB::table()` / `DB::query()` patterns
 - MCP tools for search, deps, impact, flow, status, routes, packages, and reindex
 - project or user-scoped agent bootstrap for Codex, Claude Code, and Cursor
