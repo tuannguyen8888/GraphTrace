@@ -25,6 +25,7 @@ const laravelResourceFixtureRoot = join(
   "laravel-resource-workspace",
 );
 const laravelFixtureRoot = join(process.cwd(), "fixtures", "laravel-workspace");
+const mixedFixtureRoot = join(process.cwd(), "fixtures", "mixed-workspace");
 const crudboosterLegacyFixtureRoot = join(
   process.cwd(),
   "fixtures",
@@ -121,6 +122,36 @@ describe("query engine", () => {
           edgeCount: expect.any(Number),
         }),
       });
+    } finally {
+      store.close();
+    }
+  });
+
+  test("query results warn when workspace coverage is shallow", async () => {
+    await ensureWorkspaceInitialized(mixedFixtureRoot);
+    await indexWorkspace({ workspaceRoot: mixedFixtureRoot, full: true });
+
+    const store = openGraphStore(
+      join(mixedFixtureRoot, ".graphtrace", "index.db"),
+    );
+
+    try {
+      const result = createQueryEngine(store).search("server");
+
+      expect(result.coverage?.warnings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "partial-indexing",
+          }),
+        ]),
+      );
+      expect(result.graph?.coverage?.warnings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            unitIds: expect.arrayContaining(["unit:workers/python"]),
+          }),
+        ]),
+      );
     } finally {
       store.close();
     }

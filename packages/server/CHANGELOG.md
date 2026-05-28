@@ -1,5 +1,14 @@
 # @graphtrace/server
 
+## 1.8.0
+
+### Patch Changes
+
+- Updated dependencies
+  - @graphtrace/query-engine@1.8.0
+  - @graphtrace/shared@1.8.0
+  - @graphtrace/storage@1.8.0
+
 ## 1.7.2
 
 ### Patch Changes

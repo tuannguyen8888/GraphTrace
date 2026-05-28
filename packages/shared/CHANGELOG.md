@@ -1,5 +1,11 @@
 # @graphtrace/shared
 
+## 1.8.0
+
+### Minor Changes
+
+- Add shared coverage metadata types for query results and graph envelopes.
+
 ## 1.7.2
 
 ## 1.7.1

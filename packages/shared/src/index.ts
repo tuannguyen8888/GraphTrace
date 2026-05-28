@@ -143,6 +143,17 @@ export interface GraphItem {
 export interface QueryResult<T> {
   items: T[];
   graph?: GraphEnvelope;
+  coverage?: CoverageSummary;
+}
+
+export interface CoverageWarning {
+  code: string;
+  message: string;
+  unitIds: string[];
+}
+
+export interface CoverageSummary {
+  warnings: CoverageWarning[];
 }
 
 export interface GraphEdgeDescriptor {
@@ -175,6 +186,7 @@ export interface GraphEnvelope {
   nodes: GraphItem[];
   edges: GraphEdgeDescriptor[];
   summary: GraphEnvelopeSummary;
+  coverage?: CoverageSummary;
 }
 
 export type SymbolLocator =
@@ -200,6 +212,7 @@ export function createGraphEnvelope(
       confidence,
       truncated: input.summary?.truncated,
     },
+    coverage: input.coverage,
   };
 }
 

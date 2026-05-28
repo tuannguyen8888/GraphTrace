@@ -18,6 +18,7 @@ import {
   type SupportedAgentTool,
   planAgentBootstrap,
 } from "./agent/bootstrap";
+import { formatAgentDoctorResult, inspectAgentDoctor } from "./agent/doctor";
 import {
   type AgentSetupWriteMode,
   applyRenderedAgentFiles,
@@ -26,6 +27,10 @@ import {
 } from "./agent/files";
 import { inspectAgentBootstrapStatus } from "./agent/status";
 import { renderAgentBootstrapFiles } from "./agent/templates";
+import {
+  analyzeGraphTraceSessions,
+  formatSessionAnalysis,
+} from "./session-analysis";
 
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".php"]);
 const IGNORED_NAMES = new Set([
@@ -360,6 +365,13 @@ const CLI_HELP_TREE: CliHelpCommand = {
       notes: ["Run 'graphtrace workspace <subcommand> --help' for details."],
     },
     {
+      name: "analyze-sessions",
+      heading: "graphtrace analyze-sessions",
+      summary: "Summarize GraphTrace MCP usage from Codex JSONL sessions.",
+      usage: "graphtrace analyze-sessions <path>",
+      examples: ["graphtrace analyze-sessions ~/.codex/sessions"],
+    },
+    {
       name: "agent",
       heading: "graphtrace agent",
       summary:
@@ -462,10 +474,32 @@ const CLI_HELP_TREE: CliHelpCommand = {
             "graphtrace agent restore --scope user",
           ],
         },
+        {
+          name: "doctor",
+          heading: "graphtrace agent doctor",
+          summary: "Diagnose GraphTrace MCP agent runtime configuration.",
+          usage:
+            "graphtrace agent doctor [--scope <project|user>] [--home <path>]",
+          options: [
+            {
+              flags: "--scope <scope>",
+              description: "Inspect project-local or user-scoped integration.",
+            },
+            {
+              flags: "--home <path>",
+              description: "Override the GraphTrace home directory.",
+            },
+          ],
+          examples: [
+            "graphtrace agent doctor",
+            "graphtrace agent doctor --scope user",
+          ],
+        },
       ],
       examples: [
         "graphtrace agent setup --tool codex",
         "graphtrace agent status",
+        "graphtrace agent doctor",
         "graphtrace agent restore",
       ],
       notes: ["Run 'graphtrace agent <subcommand> --help' for details."],
@@ -654,6 +688,20 @@ export async function runCli(
             stderr: "",
           };
         }
+        case "doctor": {
+          const report = await inspectAgentDoctor({
+            binaryPath: process.argv[1] ?? "unknown",
+            cliVersion: await readCliVersion(),
+            graphTraceHome,
+            userHomeDir,
+            workspaceRoot: cwd,
+          });
+          return {
+            exitCode: 0,
+            stdout: formatAgentDoctorResult(report),
+            stderr: "",
+          };
+        }
         case "restore": {
           const state = await loadAgentSetupState(
             scope === "user" ? graphTraceHome : cwd,
@@ -688,6 +736,25 @@ export async function runCli(
             ),
           };
       }
+    }
+    case "analyze-sessions": {
+      const targetPath = args[0];
+      if (!targetPath) {
+        return {
+          exitCode: 1,
+          stdout: "",
+          stderr: "analyze-sessions requires a JSONL file or directory path",
+        };
+      }
+
+      const summary = await analyzeGraphTraceSessions(
+        resolveWorkspaceArg(cwd, targetPath),
+      );
+      return {
+        exitCode: 0,
+        stdout: formatSessionAnalysis(summary),
+        stderr: "",
+      };
     }
     case "index": {
       const { runWorkspaceIndex } = await loadQueryEngineModule();

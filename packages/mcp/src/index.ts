@@ -14,6 +14,7 @@ import {
 import { createGraphTraceDaemon } from "@graphtrace/server";
 import { GRAPHTRACE_DB_PATH, type SymbolLocator } from "@graphtrace/shared";
 import type { WorkspaceRecord } from "@graphtrace/storage";
+import { createMcpTelemetry } from "./telemetry";
 
 function asToolResult(payload: unknown) {
   return {
@@ -34,6 +35,7 @@ interface GraphTraceMcpServerOptions {
 
 interface WorkspaceResolutionHint {
   workspaceId?: string;
+  workspaceRoot?: string;
   target?: string;
   filePath?: string;
   symbolId?: string;
@@ -49,20 +51,127 @@ interface ResolvedWorkspaceContext {
   runIndex(mode: "full" | "incremental"): Promise<unknown>;
 }
 
+type SymbolLocatorInput = {
+  symbolId?: string;
+  filePath?: string;
+  symbolName?: string;
+  line?: number;
+  column?: number;
+};
+
+interface SymbolResolutionRequired {
+  candidates: unknown[];
+  hint: string;
+  resolutionRequired: true;
+}
+
 export async function createGraphTraceMcpServer(
   options: GraphTraceMcpServerOptions = {},
 ) {
   const homeDir = options.homeDir ?? homedir();
   const daemon = createGraphTraceDaemon({ homeDir });
+  const telemetry = createMcpTelemetry({ homeDir });
   const server = new McpServer({
     name: "graphtrace",
     version: "1.0.0",
   });
 
   const withResolvedWorkspace = <T>(
+    toolName: string,
     hint: WorkspaceResolutionHint,
     action: (context: ResolvedWorkspaceContext) => T,
-  ) => action(resolveWorkspaceContext(hint));
+  ): T => {
+    const startedAt = Date.now();
+    let context: ResolvedWorkspaceContext | undefined;
+
+    try {
+      context = resolveWorkspaceContext(hint);
+      const result = action(context);
+      if (isPromiseLike(result)) {
+        return result
+          .then((value) => {
+            recordWorkspaceTelemetry(toolName, startedAt, true, context);
+            return value;
+          })
+          .catch((error: unknown) => {
+            recordWorkspaceTelemetry(
+              toolName,
+              startedAt,
+              false,
+              context,
+              error,
+            );
+            throw error;
+          }) as T;
+      }
+
+      recordWorkspaceTelemetry(toolName, startedAt, true, context);
+      return result;
+    } catch (error) {
+      recordWorkspaceTelemetry(toolName, startedAt, false, context, error);
+      throw error;
+    }
+  };
+
+  const recordWorkspaceTelemetry = (
+    toolName: string,
+    startedAt: number,
+    ok: boolean,
+    context?: ResolvedWorkspaceContext,
+    error?: unknown,
+  ) => {
+    telemetry.record({
+      toolName,
+      ok,
+      durationMs: Date.now() - startedAt,
+      workspaceId: context?.workspaceId,
+      workspaceRoot: context?.workspaceRoot,
+      error: error ? errorToMessage(error) : undefined,
+    });
+  };
+
+  const withToolTelemetry = <T>(toolName: string, action: () => T): T => {
+    const startedAt = Date.now();
+
+    try {
+      const result = action();
+      if (isPromiseLike(result)) {
+        return result
+          .then((value) => {
+            telemetry.record({
+              toolName,
+              ok: true,
+              durationMs: Date.now() - startedAt,
+            });
+            return value;
+          })
+          .catch((error: unknown) => {
+            telemetry.record({
+              toolName,
+              ok: false,
+              durationMs: Date.now() - startedAt,
+              error: errorToMessage(error),
+            });
+            throw error;
+          }) as T;
+      }
+
+      telemetry.record({
+        toolName,
+        ok: true,
+        durationMs: Date.now() - startedAt,
+      });
+      return result;
+    } catch (error) {
+      telemetry.record({
+        toolName,
+        ok: false,
+        durationMs: Date.now() - startedAt,
+        error: errorToMessage(error),
+      });
+      throw error;
+    }
+  };
 
   server.registerTool(
     "list_workspaces",
@@ -71,9 +180,11 @@ export async function createGraphTraceMcpServer(
       inputSchema: {},
     },
     async () =>
-      asToolResult({
-        items: daemon.listWorkspaceSummaries(),
-      }),
+      withToolTelemetry("list_workspaces", () =>
+        asToolResult({
+          items: daemon.listWorkspaceSummaries(),
+        }),
+      ),
   );
 
   server.registerTool(
@@ -85,13 +196,16 @@ export async function createGraphTraceMcpServer(
         label: z.string().optional(),
       },
     },
-    async ({ rootPath, label }) => {
-      const workspace = await daemon.addWorkspace(resolve(rootPath), { label });
-      return asToolResult({
-        workspace,
-        status: daemon.status(workspace.id),
-      });
-    },
+    async ({ rootPath, label }) =>
+      withToolTelemetry("add_workspace", async () => {
+        const workspace = await daemon.addWorkspace(resolve(rootPath), {
+          label,
+        });
+        return asToolResult({
+          workspace,
+          status: daemon.status(workspace.id),
+        });
+      }),
   );
 
   server.registerTool(
@@ -102,13 +216,14 @@ export async function createGraphTraceMcpServer(
         workspaceId: z.string(),
       },
     },
-    async ({ workspaceId }) => {
-      const workspace = await daemon.reindexWorkspace(workspaceId);
-      return asToolResult({
-        workspace,
-        status: daemon.status(workspace.id),
-      });
-    },
+    async ({ workspaceId }) =>
+      withToolTelemetry("reindex_workspace", async () => {
+        const workspace = await daemon.reindexWorkspace(workspaceId);
+        return asToolResult({
+          workspace,
+          status: daemon.status(workspace.id),
+        });
+      }),
   );
 
   server.registerTool(
@@ -119,19 +234,20 @@ export async function createGraphTraceMcpServer(
         workspaceId: z.string(),
       },
     },
-    async ({ workspaceId }) => {
-      const workspace = daemon.getWorkspace(workspaceId);
-      if (!workspace) {
-        throw new Error(`Unknown workspace: ${workspaceId}`);
-      }
+    async ({ workspaceId }) =>
+      withToolTelemetry("remove_workspace", () => {
+        const workspace = daemon.getWorkspace(workspaceId);
+        if (!workspace) {
+          throw new Error(`Unknown workspace: ${workspaceId}`);
+        }
 
-      daemon.removeWorkspace(workspaceId);
-      return asToolResult({
-        removed: true,
-        workspaceId,
-        label: workspace.label,
-      });
-    },
+        daemon.removeWorkspace(workspaceId);
+        return asToolResult({
+          removed: true,
+          workspaceId,
+          label: workspace.label,
+        });
+      }),
   );
 
   server.registerTool(
@@ -142,12 +258,16 @@ export async function createGraphTraceMcpServer(
       inputSchema: {
         query: z.string(),
         workspaceId: z.string().optional(),
+        workspaceRoot: z.string().optional(),
       },
     },
-    async ({ query, workspaceId }) =>
+    async ({ query, workspaceId, workspaceRoot }) =>
       asToolResult(
-        withResolvedWorkspace({ workspaceId }, (context) =>
-          context.withQueryEngine((engine) => engine.searchSymbols(query)),
+        withResolvedWorkspace(
+          "graphtrace_search_symbols",
+          { workspaceId, workspaceRoot },
+          (context) =>
+            context.withQueryEngine((engine) => engine.searchSymbols(query)),
         ),
       ),
   );
@@ -159,6 +279,7 @@ export async function createGraphTraceMcpServer(
         "Resolve a symbol by id, file plus name, or file plus position.",
       inputSchema: {
         workspaceId: z.string().optional(),
+        workspaceRoot: z.string().optional(),
         symbolId: z.string().optional(),
         filePath: z.string().optional(),
         symbolName: z.string().optional(),
@@ -166,18 +287,23 @@ export async function createGraphTraceMcpServer(
         column: z.number().int().positive().optional(),
       },
     },
-    async ({ workspaceId, ...locator }) =>
+    async ({ workspaceId, workspaceRoot, ...locator }) =>
       asToolResult(
         withResolvedWorkspace(
+          "graphtrace_get_symbol",
           {
             workspaceId,
+            workspaceRoot,
             filePath: locator.filePath,
             symbolId: locator.symbolId,
           },
           (context) =>
-            context.withQueryEngine((engine) =>
-              engine.getSymbol(toSymbolLocator(locator)),
-            ),
+            context.withQueryEngine((engine) => {
+              const resolvedLocator = resolveSymbolLocator(engine, locator);
+              return isSymbolResolutionRequired(resolvedLocator)
+                ? resolvedLocator
+                : engine.getSymbol(resolvedLocator);
+            }),
         ),
       ),
   );
@@ -189,6 +315,7 @@ export async function createGraphTraceMcpServer(
         "Get upstream callers, downstream callees, and sinks for a symbol.",
       inputSchema: {
         workspaceId: z.string().optional(),
+        workspaceRoot: z.string().optional(),
         symbolId: z.string().optional(),
         filePath: z.string().optional(),
         symbolName: z.string().optional(),
@@ -198,21 +325,26 @@ export async function createGraphTraceMcpServer(
         maxEdges: z.number().int().positive().optional(),
       },
     },
-    async ({ workspaceId, maxNodes, maxEdges, ...locator }) =>
+    async ({ workspaceId, workspaceRoot, maxNodes, maxEdges, ...locator }) =>
       asToolResult(
         withResolvedWorkspace(
+          "graphtrace_get_execution_context",
           {
             workspaceId,
+            workspaceRoot,
             filePath: locator.filePath,
             symbolId: locator.symbolId,
           },
           (context) =>
-            context.withQueryEngine((engine) =>
-              engine.executionContextFromSymbol(toSymbolLocator(locator), {
-                maxNodes,
-                maxEdges,
-              }),
-            ),
+            context.withQueryEngine((engine) => {
+              const resolvedLocator = resolveSymbolLocator(engine, locator);
+              return isSymbolResolutionRequired(resolvedLocator)
+                ? resolvedLocator
+                : engine.executionContextFromSymbol(resolvedLocator, {
+                    maxNodes,
+                    maxEdges,
+                  });
+            }),
         ),
       ),
   );
@@ -224,6 +356,7 @@ export async function createGraphTraceMcpServer(
         "Get an impact-oriented symbol graph with truncation metadata.",
       inputSchema: {
         workspaceId: z.string().optional(),
+        workspaceRoot: z.string().optional(),
         symbolId: z.string().optional(),
         filePath: z.string().optional(),
         symbolName: z.string().optional(),
@@ -233,21 +366,26 @@ export async function createGraphTraceMcpServer(
         maxEdges: z.number().int().positive().optional(),
       },
     },
-    async ({ workspaceId, maxNodes, maxEdges, ...locator }) =>
+    async ({ workspaceId, workspaceRoot, maxNodes, maxEdges, ...locator }) =>
       asToolResult(
         withResolvedWorkspace(
+          "graphtrace_get_symbol_impact",
           {
             workspaceId,
+            workspaceRoot,
             filePath: locator.filePath,
             symbolId: locator.symbolId,
           },
           (context) =>
-            context.withQueryEngine((engine) =>
-              engine.impactFromSymbol(toSymbolLocator(locator), {
-                maxNodes,
-                maxEdges,
-              }),
-            ),
+            context.withQueryEngine((engine) => {
+              const resolvedLocator = resolveSymbolLocator(engine, locator);
+              return isSymbolResolutionRequired(resolvedLocator)
+                ? resolvedLocator
+                : engine.impactFromSymbol(resolvedLocator, {
+                    maxNodes,
+                    maxEdges,
+                  });
+            }),
         ),
       ),
   );
@@ -258,13 +396,17 @@ export async function createGraphTraceMcpServer(
       description: "Explain provenance and confidence for a symbol graph edge.",
       inputSchema: {
         workspaceId: z.string().optional(),
+        workspaceRoot: z.string().optional(),
         edgeId: z.string(),
       },
     },
-    async ({ workspaceId, edgeId }) =>
+    async ({ workspaceId, workspaceRoot, edgeId }) =>
       asToolResult(
-        withResolvedWorkspace({ workspaceId }, (context) =>
-          context.withQueryEngine((engine) => engine.explainEdge(edgeId)),
+        withResolvedWorkspace(
+          "graphtrace_explain_edge",
+          { workspaceId, workspaceRoot },
+          (context) =>
+            context.withQueryEngine((engine) => engine.explainEdge(edgeId)),
         ),
       ),
   );
@@ -276,12 +418,16 @@ export async function createGraphTraceMcpServer(
       inputSchema: {
         query: z.string(),
         workspaceId: z.string().optional(),
+        workspaceRoot: z.string().optional(),
       },
     },
-    async ({ query, workspaceId }) =>
+    async ({ query, workspaceId, workspaceRoot }) =>
       asToolResult(
-        withResolvedWorkspace({ workspaceId }, (context) =>
-          context.withQueryEngine((engine) => engine.search(query)),
+        withResolvedWorkspace(
+          "search_code",
+          { workspaceId, workspaceRoot },
+          (context) =>
+            context.withQueryEngine((engine) => engine.search(query)),
         ),
       ),
   );
@@ -293,12 +439,16 @@ export async function createGraphTraceMcpServer(
       inputSchema: {
         query: z.string(),
         workspaceId: z.string().optional(),
+        workspaceRoot: z.string().optional(),
       },
     },
-    async ({ query, workspaceId }) =>
+    async ({ query, workspaceId, workspaceRoot }) =>
       asToolResult(
-        withResolvedWorkspace({ workspaceId }, (context) =>
-          context.withQueryEngine((engine) => engine.getSymbolContext(query)),
+        withResolvedWorkspace(
+          "get_symbol_context",
+          { workspaceId, workspaceRoot },
+          (context) =>
+            context.withQueryEngine((engine) => engine.getSymbolContext(query)),
         ),
       ),
   );
@@ -309,17 +459,21 @@ export async function createGraphTraceMcpServer(
       description: "Get dependencies for a file path.",
       inputSchema: {
         workspaceId: z.string().optional(),
+        workspaceRoot: z.string().optional(),
         target: z.string(),
         direction: z.enum(["in", "out", "both"]).default("both"),
         depth: z.number().int().positive().default(1),
       },
     },
-    async ({ workspaceId, target, direction, depth }) =>
+    async ({ workspaceId, workspaceRoot, target, direction, depth }) =>
       asToolResult(
-        withResolvedWorkspace({ workspaceId, target }, (context) =>
-          context.withQueryEngine((engine) =>
-            engine.dependencies(target, direction, depth),
-          ),
+        withResolvedWorkspace(
+          "get_dependencies",
+          { workspaceId, workspaceRoot, target },
+          (context) =>
+            context.withQueryEngine((engine) =>
+              engine.dependencies(target, direction, depth),
+            ),
         ),
       ),
   );
@@ -330,14 +484,18 @@ export async function createGraphTraceMcpServer(
       description: "Get static impact analysis for a file path.",
       inputSchema: {
         workspaceId: z.string().optional(),
+        workspaceRoot: z.string().optional(),
         target: z.string(),
         depth: z.number().int().positive().default(6),
       },
     },
-    async ({ workspaceId, target, depth }) =>
+    async ({ workspaceId, workspaceRoot, target, depth }) =>
       asToolResult(
-        withResolvedWorkspace({ workspaceId, target }, (context) =>
-          context.withQueryEngine((engine) => engine.impact(target, depth)),
+        withResolvedWorkspace(
+          "get_impact_analysis",
+          { workspaceId, workspaceRoot, target },
+          (context) =>
+            context.withQueryEngine((engine) => engine.impact(target, depth)),
         ),
       ),
   );
@@ -348,14 +506,18 @@ export async function createGraphTraceMcpServer(
       description: "Get route-to-query flow using GraphTrace heuristics.",
       inputSchema: {
         workspaceId: z.string().optional(),
+        workspaceRoot: z.string().optional(),
         target: z.string(),
         depth: z.number().int().positive().default(6),
       },
     },
-    async ({ workspaceId, target, depth }) =>
+    async ({ workspaceId, workspaceRoot, target, depth }) =>
       asToolResult(
-        withResolvedWorkspace({ workspaceId, target }, (context) =>
-          context.withQueryEngine((engine) => engine.flow(target, depth)),
+        withResolvedWorkspace(
+          "get_data_flow",
+          { workspaceId, workspaceRoot, target },
+          (context) =>
+            context.withQueryEngine((engine) => engine.flow(target, depth)),
         ),
       ),
   );
@@ -366,12 +528,15 @@ export async function createGraphTraceMcpServer(
       description: "List routes discovered in the selected workspace.",
       inputSchema: {
         workspaceId: z.string().optional(),
+        workspaceRoot: z.string().optional(),
       },
     },
-    async ({ workspaceId }) =>
+    async ({ workspaceId, workspaceRoot }) =>
       asToolResult(
-        withResolvedWorkspace({ workspaceId }, (context) =>
-          context.withQueryEngine((engine) => engine.routes()),
+        withResolvedWorkspace(
+          "get_routes",
+          { workspaceId, workspaceRoot },
+          (context) => context.withQueryEngine((engine) => engine.routes()),
         ),
       ),
   );
@@ -382,11 +547,16 @@ export async function createGraphTraceMcpServer(
       description: "Get workspace, database, and last index run status.",
       inputSchema: {
         workspaceId: z.string().optional(),
+        workspaceRoot: z.string().optional(),
       },
     },
-    async ({ workspaceId }) =>
+    async ({ workspaceId, workspaceRoot }) =>
       asToolResult(
-        withResolvedWorkspace({ workspaceId }, (context) => context.status()),
+        withResolvedWorkspace(
+          "get_status",
+          { workspaceId, workspaceRoot },
+          (context) => context.status(),
+        ),
       ),
   );
 
@@ -396,13 +566,16 @@ export async function createGraphTraceMcpServer(
       description: "Run GraphTrace indexing for the selected workspace.",
       inputSchema: {
         workspaceId: z.string().optional(),
+        workspaceRoot: z.string().optional(),
         mode: z.enum(["full", "incremental"]).default("incremental"),
       },
     },
-    async ({ workspaceId, mode }) =>
+    async ({ workspaceId, workspaceRoot, mode }) =>
       asToolResult(
-        await withResolvedWorkspace({ workspaceId }, (context) =>
-          context.runIndex(mode),
+        await withResolvedWorkspace(
+          "run_index",
+          { workspaceId, workspaceRoot },
+          (context) => context.runIndex(mode),
         ),
       ),
   );
@@ -413,12 +586,16 @@ export async function createGraphTraceMcpServer(
       description: "List packages discovered in the selected workspace.",
       inputSchema: {
         workspaceId: z.string().optional(),
+        workspaceRoot: z.string().optional(),
       },
     },
-    async ({ workspaceId }) =>
+    async ({ workspaceId, workspaceRoot }) =>
       asToolResult(
-        withResolvedWorkspace({ workspaceId }, (context) =>
-          context.withQueryEngine((engine) => engine.listPackages()),
+        withResolvedWorkspace(
+          "list_packages",
+          { workspaceId, workspaceRoot },
+          (context) =>
+            context.withQueryEngine((engine) => engine.listPackages()),
         ),
       ),
   );
@@ -429,12 +606,16 @@ export async function createGraphTraceMcpServer(
       description: "Get the package overview for the selected workspace.",
       inputSchema: {
         workspaceId: z.string().optional(),
+        workspaceRoot: z.string().optional(),
       },
     },
-    async ({ workspaceId }) =>
+    async ({ workspaceId, workspaceRoot }) =>
       asToolResult(
-        withResolvedWorkspace({ workspaceId }, (context) =>
-          context.withQueryEngine((engine) => engine.getPackageOverview()),
+        withResolvedWorkspace(
+          "get_package_overview",
+          { workspaceId, workspaceRoot },
+          (context) =>
+            context.withQueryEngine((engine) => engine.getPackageOverview()),
         ),
       ),
   );
@@ -477,6 +658,24 @@ export async function createGraphTraceMcpServer(
     const registeredWorkspaces = daemon
       .listWorkspaces()
       .filter((workspace) => workspace.status !== "missing");
+
+    if (hint.workspaceRoot) {
+      const matchingWorkspace = selectWorkspaceByRoot(
+        registeredWorkspaces,
+        hint.workspaceRoot,
+      );
+      if (matchingWorkspace) {
+        return createRegisteredContext(matchingWorkspace);
+      }
+    }
+
+    const startupWorkspace = selectWorkspaceByRoot(
+      registeredWorkspaces,
+      options.workspaceRoot,
+    );
+    if (startupWorkspace) {
+      return createRegisteredContext(startupWorkspace);
+    }
 
     if (registeredWorkspaces.length === 1) {
       return createRegisteredContext(registeredWorkspaces[0]);
@@ -584,23 +783,115 @@ function workspaceContainsPath(
   return existsSync(resolve(workspace.canonicalRootPath, pathHint));
 }
 
-function ambiguousWorkspaceError(workspaces: WorkspaceRecord[]): Error {
-  const candidates = workspaces
-    .map((workspace) => `${workspace.id} (${workspace.label})`)
-    .join(", ");
+function selectWorkspaceByRoot(
+  workspaces: WorkspaceRecord[],
+  workspaceRoot: string | undefined,
+): WorkspaceRecord | null {
+  if (!workspaceRoot || workspaceRoot === "/") {
+    return null;
+  }
 
-  return new Error(
-    `GraphTrace MCP could not resolve a workspace automatically. Pass workspaceId. Candidates: ${candidates}`,
+  const resolvedRoot = resolve(workspaceRoot);
+  const matches = workspaces
+    .filter((workspace) =>
+      pathContains(workspace.canonicalRootPath, resolvedRoot),
+    )
+    .sort(
+      (left, right) =>
+        right.canonicalRootPath.length - left.canonicalRootPath.length,
+    );
+
+  return matches[0] ?? null;
+}
+
+function pathContains(parentPath: string, childPath: string): boolean {
+  const resolvedParent = resolve(parentPath);
+  const resolvedChild = resolve(childPath);
+  return (
+    resolvedChild === resolvedParent ||
+    resolvedChild.startsWith(`${resolvedParent}/`)
   );
 }
 
-function toSymbolLocator(input: {
-  symbolId?: string;
-  filePath?: string;
-  symbolName?: string;
-  line?: number;
-  column?: number;
-}): SymbolLocator {
+function ambiguousWorkspaceError(workspaces: WorkspaceRecord[]): Error {
+  const candidates = workspaces
+    .map(
+      (workspace) =>
+        `- ${workspace.id} (${workspace.label}) at ${workspace.canonicalRootPath}`,
+    )
+    .join("\n");
+
+  return new Error(
+    [
+      "GraphTrace MCP could not resolve a workspace automatically.",
+      "Pass workspaceId or workspaceRoot explicitly.",
+      "Registered workspaces:",
+      candidates,
+      "Hint: call list_workspaces, then retry with the selected workspaceId.",
+    ].join("\n"),
+  );
+}
+
+function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    "then" in value &&
+    typeof (value as { then?: unknown }).then === "function"
+  );
+}
+
+function errorToMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function resolveSymbolLocator(
+  engine: ReturnType<typeof createQueryEngine>,
+  input: SymbolLocatorInput,
+): SymbolLocator | SymbolResolutionRequired {
+  if (
+    !input.symbolId &&
+    !input.filePath &&
+    input.symbolName &&
+    typeof input.line !== "number" &&
+    typeof input.column !== "number"
+  ) {
+    const searchResult = engine.searchSymbols(input.symbolName) as {
+      items?: Array<{ id?: string; label?: string; name?: string }>;
+    };
+    const items = searchResult.items ?? [];
+    const exactMatches = items.filter(
+      (item) =>
+        item.name === input.symbolName ||
+        item.label === input.symbolName ||
+        item.id?.endsWith(`#${input.symbolName}`),
+    );
+    const candidates = exactMatches.length > 0 ? exactMatches : items;
+
+    if (candidates.length === 1 && candidates[0].id) {
+      return { symbolId: candidates[0].id };
+    }
+
+    return {
+      candidates: candidates.slice(0, 10),
+      hint:
+        candidates.length === 0
+          ? `No symbol matched ${input.symbolName}. Try graphtrace_search_symbols or search_code first.`
+          : "Pass symbolId or filePath + symbolName to disambiguate.",
+      resolutionRequired: true,
+    };
+  }
+
+  return toSymbolLocator(input);
+}
+
+function isSymbolResolutionRequired(
+  result: SymbolLocator | SymbolResolutionRequired,
+): result is SymbolResolutionRequired {
+  return "resolutionRequired" in result;
+}
+
+function toSymbolLocator(input: SymbolLocatorInput): SymbolLocator {
   if (input.symbolId) {
     return { symbolId: input.symbolId };
   }

@@ -1,5 +1,18 @@
 # @graphtrace/query-engine
 
+## 1.8.0
+
+### Minor Changes
+
+- Add partial-coverage warnings to query results and graph envelopes when workspace units are shallow or unknown.
+
+### Patch Changes
+
+- Updated dependencies
+  - @graphtrace/shared@1.8.0
+  - @graphtrace/indexer@1.8.0
+  - @graphtrace/storage@1.8.0
+
 ## 1.7.2
 
 ### Patch Changes
