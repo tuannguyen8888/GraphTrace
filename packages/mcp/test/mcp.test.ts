@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -328,7 +328,7 @@ describe("mcp", () => {
             symbolName: "registerSingleWorkspaceRoutes",
           },
         });
-        const ambiguousRoutes = await client.callTool({
+        const cwdRoutes = await client.callTool({
           name: "get_routes",
           arguments: {},
         });
@@ -340,7 +340,6 @@ describe("mcp", () => {
         const autoResolvedItems = readToolItems(
           autoResolvedSymbol.structuredContent,
         );
-        const ambiguousText = readToolText(ambiguousRoutes);
 
         expect(workspaces.isError).not.toBe(true);
         expect(workspaceItems).toEqual(
@@ -361,8 +360,7 @@ describe("mcp", () => {
               item.filePath?.includes("packages/server/src/index.ts"),
           ),
         ).toBe(true);
-        expect(ambiguousRoutes.isError).toBe(true);
-        expect(ambiguousText).toContain("workspaceId");
+        expect(cwdRoutes.isError).not.toBe(true);
       } finally {
         await transport.close().catch(() => undefined);
       }
@@ -614,6 +612,191 @@ describe("mcp", () => {
         ]),
       );
     } finally {
+      await transport.close().catch(() => undefined);
+      daemon.close();
+    }
+  }, 20_000);
+
+  test("prefers the MCP startup cwd when multiple registered workspaces exist", async () => {
+    await ensureWorkspaceInitialized(fixtureRoot);
+    await ensureWorkspaceInitialized(symbolGraphFixtureRoot);
+    await indexWorkspace({ workspaceRoot: fixtureRoot, full: true });
+    await indexWorkspace({ workspaceRoot: symbolGraphFixtureRoot, full: true });
+    const homeDir = await mkdtemp(join(tmpdir(), "graphtrace-mcp-home-"));
+    const daemon = createGraphTraceDaemon({ homeDir });
+
+    const transport = new StdioClientTransport({
+      command: "pnpm",
+      args: [
+        "exec",
+        "node",
+        "--import",
+        "tsx",
+        cliEntry,
+        "mcp",
+        "--home",
+        homeDir,
+      ],
+      cwd: symbolGraphFixtureRoot,
+      stderr: "pipe",
+    });
+    const client = new Client(
+      {
+        name: "graphtrace-test-client",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {},
+      },
+    );
+
+    try {
+      await daemon.addWorkspace(fixtureRoot, { label: "fixture" });
+      await daemon.addWorkspace(symbolGraphFixtureRoot, { label: "symbols" });
+      await client.connect(transport);
+
+      const status = await client.callTool({
+        name: "get_status",
+        arguments: {},
+      });
+      const payload = status.structuredContent as { workspaceRoot?: string };
+
+      expect(status.isError).not.toBe(true);
+      expect(payload.workspaceRoot).toBe(symbolGraphFixtureRoot);
+    } finally {
+      await client.close().catch(() => undefined);
+      await transport.close().catch(() => undefined);
+      daemon.close();
+    }
+  }, 20_000);
+
+  test("resolves unique symbolName-only MCP graph lookups", async () => {
+    await ensureWorkspaceInitialized(symbolGraphFixtureRoot);
+    await indexWorkspace({ workspaceRoot: symbolGraphFixtureRoot, full: true });
+    const homeDir = await mkdtemp(join(tmpdir(), "graphtrace-mcp-home-"));
+    const daemon = createGraphTraceDaemon({ homeDir });
+
+    const transport = new StdioClientTransport({
+      command: "pnpm",
+      args: [
+        "exec",
+        "node",
+        "--import",
+        "tsx",
+        cliEntry,
+        "mcp",
+        "--home",
+        homeDir,
+      ],
+      cwd: symbolGraphFixtureRoot,
+      stderr: "pipe",
+    });
+    const client = new Client(
+      {
+        name: "graphtrace-test-client",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {},
+      },
+    );
+
+    try {
+      await daemon.addWorkspace(symbolGraphFixtureRoot, { label: "symbols" });
+      await client.connect(transport);
+
+      const execution = await client.callTool({
+        name: "graphtrace_get_execution_context",
+        arguments: {
+          symbolName: "listUsers",
+          maxNodes: 10,
+          maxEdges: 10,
+        },
+      });
+      const impact = await client.callTool({
+        name: "graphtrace_get_symbol_impact",
+        arguments: {
+          symbolName: "auditedListUsers",
+          maxNodes: 2,
+          maxEdges: 1,
+        },
+      });
+      const executionPayload = execution.structuredContent as {
+        graph?: { nodes?: Array<{ id?: string; kind?: string }> };
+      };
+      const impactPayload = impact.structuredContent as {
+        graph?: { summary?: { truncated?: { nodeLimitReached?: boolean } } };
+      };
+
+      expect(execution.isError).not.toBe(true);
+      expect(executionPayload.graph?.nodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "GET /users",
+            kind: "route",
+          }),
+        ]),
+      );
+      expect(impact.isError).not.toBe(true);
+      expect(impactPayload.graph?.summary?.truncated?.nodeLimitReached).toBe(
+        true,
+      );
+    } finally {
+      await client.close().catch(() => undefined);
+      await transport.close().catch(() => undefined);
+      daemon.close();
+    }
+  }, 20_000);
+
+  test("writes opt-in MCP telemetry events", async () => {
+    await ensureWorkspaceInitialized(fixtureRoot);
+    await indexWorkspace({ workspaceRoot: fixtureRoot, full: true });
+    const homeDir = await mkdtemp(join(tmpdir(), "graphtrace-mcp-home-"));
+    const daemon = createGraphTraceDaemon({ homeDir });
+
+    const transport = new StdioClientTransport({
+      command: "pnpm",
+      args: [
+        "exec",
+        "node",
+        "--import",
+        "tsx",
+        cliEntry,
+        "mcp",
+        "--home",
+        homeDir,
+      ],
+      cwd: fixtureRoot,
+      env: {
+        ...process.env,
+        GRAPHTRACE_MCP_TELEMETRY: "1",
+      },
+      stderr: "pipe",
+    });
+    const client = new Client(
+      {
+        name: "graphtrace-test-client",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {},
+      },
+    );
+
+    try {
+      await daemon.addWorkspace(fixtureRoot, { label: "fixture" });
+      await client.connect(transport);
+      await client.callTool({ name: "get_status", arguments: {} });
+      await client.close();
+
+      const telemetry = await readFile(
+        join(homeDir, ".graphtrace", "mcp-telemetry.jsonl"),
+        "utf8",
+      );
+      expect(telemetry).toContain('"toolName":"get_status"');
+      expect(telemetry).toContain('"ok":true');
+    } finally {
+      await client.close().catch(() => undefined);
       await transport.close().catch(() => undefined);
       daemon.close();
     }

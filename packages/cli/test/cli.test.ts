@@ -216,6 +216,53 @@ describe("cli", () => {
     );
   });
 
+  test("analyze-sessions summarizes GraphTrace MCP errors and fallbacks", async () => {
+    const sessionsRoot = await mkdtemp(
+      join(tmpdir(), "graphtrace-cli-sessions-"),
+    );
+    await writeFile(
+      join(sessionsRoot, "session.jsonl"),
+      [
+        JSON.stringify({
+          type: "mcp_tool_call_end",
+          invocation: { server: "graphtrace", tool: "get_status" },
+          result: { Ok: { isError: false } },
+        }),
+        JSON.stringify({
+          type: "mcp_tool_call_end",
+          invocation: { server: "graphtrace", tool: "get_routes" },
+          result: {
+            Ok: {
+              isError: true,
+              content: [{ text: "unable to open database file" }],
+            },
+          },
+        }),
+        JSON.stringify({
+          type: "response_item",
+          item: {
+            type: "message",
+            content: [
+              { text: "GraphTrace failed, falling back to rg for routes" },
+            ],
+          },
+        }),
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = await runCli(["analyze-sessions", sessionsRoot], {
+      cwd: process.cwd(),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("GraphTrace Session Analysis");
+    expect(result.stdout).toContain("graphtrace_calls:2");
+    expect(result.stdout).toContain("graphtrace_errors:1");
+    expect(result.stdout).toContain("fallback_mentions:1");
+    expect(result.stdout).toContain("unable to open database file");
+  });
+
   test("process --help prints top-level CLI help", async () => {
     const result = await runCliProcess(process.cwd(), ["--help"]);
 
@@ -574,6 +621,28 @@ describe("cli", () => {
         }),
       ]),
     );
+  });
+
+  test("agent doctor reports versions, config, and workspace hints", async () => {
+    const workspaceRoot = await mkdtemp(
+      join(tmpdir(), "graphtrace-cli-agent-doctor-"),
+    );
+    await mkdir(join(workspaceRoot, ".codex"), { recursive: true });
+    await writeFile(
+      join(workspaceRoot, ".codex", "config.toml"),
+      '[mcp_servers.graphtrace]\ncommand = "graphtrace"\nargs = ["mcp"]\n',
+      "utf8",
+    );
+
+    const result = await runCli(["agent", "doctor"], { cwd: workspaceRoot });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("GraphTrace Agent Doctor");
+    expect(result.stdout).toContain("cli_version:");
+    expect(result.stdout).toContain("workspace_root:");
+    expect(result.stdout).toContain("mcp_config:");
+    expect(result.stdout).toContain("recommendation:");
+    expect(result.stderr).toBe("");
   });
 
   test("agent restore removes created files and restores overwritten content", async () => {

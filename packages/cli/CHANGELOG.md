@@ -1,5 +1,17 @@
 # graphtrace
 
+## 1.8.0
+
+### Minor Changes
+
+- Improve GraphTrace MCP reliability for agentic development workflows.
+
+  - Add `graphtrace agent doctor` and `graphtrace analyze-sessions` for diagnosing MCP setup, version drift, session errors, and fallback behavior.
+  - Make MCP workspace resolution prefer explicit `workspaceRoot` and startup cwd before requiring manual workspace ids.
+  - Improve symbol-name-only MCP lookups with disambiguation hints instead of empty graph results.
+  - Add partial-coverage warnings for shallow or unknown units in query results.
+  - Add opt-in local MCP telemetry via `GRAPHTRACE_MCP_TELEMETRY=1`.
+
 ## 1.7.2
 
 ### Patch Changes

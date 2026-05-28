@@ -2,6 +2,7 @@ import { join } from "node:path";
 
 import { indexWorkspace } from "@graphtrace/indexer";
 import type {
+  CoverageSummary,
   DependencyDirection,
   GraphItem,
   QueryResult,
@@ -13,6 +14,47 @@ import type { GraphStore } from "@graphtrace/storage";
 import { openGraphStore } from "@graphtrace/storage";
 
 export function createQueryEngine(store: GraphStore) {
+  const coverage = (): CoverageSummary | undefined => {
+    const partialUnits = store
+      .units()
+      .filter(
+        (unit) => unit.indexingMode !== "full" || unit.language === "unknown",
+      );
+
+    if (partialUnits.length === 0) {
+      return undefined;
+    }
+
+    return {
+      warnings: [
+        {
+          code: "partial-indexing",
+          message:
+            "Some workspace units were indexed as shallow metadata only; results may omit symbols, routes, or edges from those units.",
+          unitIds: partialUnits.map((unit) => unit.id),
+        },
+      ],
+    };
+  };
+
+  const withCoverage = <T>(result: QueryResult<T>): QueryResult<T> => {
+    const coverageSummary = coverage();
+    if (!coverageSummary) {
+      return result;
+    }
+
+    return {
+      ...result,
+      coverage: coverageSummary,
+      graph: result.graph
+        ? {
+            ...result.graph,
+            coverage: coverageSummary,
+          }
+        : result.graph,
+    };
+  };
+
   const resolveSymbol = (locator: SymbolLocator): SymbolDescriptor | null => {
     if ("symbolId" in locator) {
       return store.symbolById(locator.symbolId);
@@ -31,38 +73,39 @@ export function createQueryEngine(store: GraphStore) {
 
   const zeroHopSymbolResult = (
     symbols: SymbolDescriptor[],
-  ): QueryResult<SymbolDescriptor> => ({
-    items: symbols,
-    graph: createGraphEnvelope({
-      nodes: symbols.map(toSymbolGraphItem),
-      summary: {
-        nodeCount: symbols.length,
-        edgeCount: 0,
-        rootNodeIds: symbols.map((symbol) => symbol.id),
-        confidence: {},
-      },
-    }),
-  });
+  ): QueryResult<SymbolDescriptor> =>
+    withCoverage({
+      items: symbols,
+      graph: createGraphEnvelope({
+        nodes: symbols.map(toSymbolGraphItem),
+        summary: {
+          nodeCount: symbols.length,
+          edgeCount: 0,
+          rootNodeIds: symbols.map((symbol) => symbol.id),
+          confidence: {},
+        },
+      }),
+    });
 
   return {
     search(query: string, kind?: string) {
-      return store.search(query, kind);
+      return withCoverage(store.search(query, kind));
     },
     searchByRepository(repositoryId: string, query: string, kind?: string) {
-      return store.searchByRepository(repositoryId, query, kind);
+      return withCoverage(store.searchByRepository(repositoryId, query, kind));
     },
     routes(packageName?: string) {
-      return store.routes(packageName);
+      return withCoverage(store.routes(packageName));
     },
     routesByRepository(repositoryId: string, packageName?: string) {
-      return store.routesByRepository(repositoryId, packageName);
+      return withCoverage(store.routesByRepository(repositoryId, packageName));
     },
     dependencies(
       target: string,
       direction: DependencyDirection = "both",
       depth = 1,
     ) {
-      return store.fileDependencies(target, direction, depth);
+      return withCoverage(store.fileDependencies(target, direction, depth));
     },
     dependenciesByRepository(
       repositoryId: string,
@@ -70,24 +113,30 @@ export function createQueryEngine(store: GraphStore) {
       direction: DependencyDirection = "both",
       depth = 1,
     ) {
-      return store.fileDependenciesByRepository(
-        repositoryId,
-        target,
-        direction,
-        depth,
+      return withCoverage(
+        store.fileDependenciesByRepository(
+          repositoryId,
+          target,
+          direction,
+          depth,
+        ),
       );
     },
     impact(target: string, depth = 6) {
-      return store.impactFromPath(target, depth);
+      return withCoverage(store.impactFromPath(target, depth));
     },
     impactByRepository(repositoryId: string, target: string, depth = 6) {
-      return store.impactFromPathByRepository(repositoryId, target, depth);
+      return withCoverage(
+        store.impactFromPathByRepository(repositoryId, target, depth),
+      );
     },
     flow(target: string, depth = 6) {
-      return store.flowFromRoute(target, depth);
+      return withCoverage(store.flowFromRoute(target, depth));
     },
     flowByRepository(repositoryId: string, target: string, depth = 6) {
-      return store.flowFromRouteByRepository(repositoryId, target, depth);
+      return withCoverage(
+        store.flowFromRouteByRepository(repositoryId, target, depth),
+      );
     },
     listPackages() {
       return store.packageOverview();
@@ -104,7 +153,7 @@ export function createQueryEngine(store: GraphStore) {
       };
     },
     getSymbolContext(query: string) {
-      return store.search(query);
+      return withCoverage(store.search(query));
     },
     searchSymbols(query: string) {
       return zeroHopSymbolResult(
@@ -122,17 +171,17 @@ export function createQueryEngine(store: GraphStore) {
       const symbol = resolveSymbol(locator);
 
       if (!symbol) {
-        return {
+        return withCoverage({
           items: [],
           graph: createGraphEnvelope(),
-        };
+        });
       }
 
       const graph = store.symbolNeighbors(symbol.id);
-      return {
+      return withCoverage({
         items: graph.nodes,
         graph,
-      };
+      });
     },
     executionContextFromSymbol(
       locator: SymbolLocator,
@@ -141,17 +190,17 @@ export function createQueryEngine(store: GraphStore) {
       const symbol = resolveSymbol(locator);
 
       if (!symbol) {
-        return {
+        return withCoverage({
           items: [],
           graph: createGraphEnvelope(),
-        };
+        });
       }
 
       const graph = store.executionContextFromSymbol(symbol.id, options);
-      return {
+      return withCoverage({
         items: graph.nodes,
         graph,
-      };
+      });
     },
     impactFromSymbol(
       locator: SymbolLocator,
@@ -160,17 +209,17 @@ export function createQueryEngine(store: GraphStore) {
       const symbol = resolveSymbol(locator);
 
       if (!symbol) {
-        return {
+        return withCoverage({
           items: [],
           graph: createGraphEnvelope(),
-        };
+        });
       }
 
       const graph = store.impactFromSymbol(symbol.id, options);
-      return {
+      return withCoverage({
         items: graph.nodes,
         graph,
-      };
+      });
     },
     explainEdge(edgeId: string) {
       return store.explainEdge(edgeId);

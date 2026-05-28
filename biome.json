@@ -5,7 +5,8 @@
       "**/dist/**",
       "**/.graphtrace/**",
       "**/playwright-report/**",
-      "**/test-results/**"
+      "**/test-results/**",
+      "**/.worktrees/**"
     ]
   },
   "formatter": {

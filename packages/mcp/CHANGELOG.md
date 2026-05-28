@@ -1,5 +1,23 @@
 # @graphtrace/mcp
 
+## 1.8.0
+
+### Minor Changes
+
+- Improve GraphTrace MCP reliability for agentic development workflows.
+
+  - Make MCP workspace resolution prefer explicit `workspaceRoot` and startup cwd before requiring manual workspace ids.
+  - Improve symbol-name-only MCP lookups with disambiguation hints instead of empty graph results.
+  - Add opt-in local MCP telemetry via `GRAPHTRACE_MCP_TELEMETRY=1`.
+
+### Patch Changes
+
+- Updated dependencies
+  - @graphtrace/query-engine@1.8.0
+  - @graphtrace/shared@1.8.0
+  - @graphtrace/server@1.8.0
+  - @graphtrace/storage@1.8.0
+
 ## 1.7.2
 
 ### Patch Changes
