@@ -6,7 +6,8 @@
       "**/.graphtrace/**",
       "**/playwright-report/**",
       "**/test-results/**",
-      "**/.worktrees/**"
+      "**/.worktrees/**",
+      "**/.pnpm-store/**"
     ]
   },
   "formatter": {

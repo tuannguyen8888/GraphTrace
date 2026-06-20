@@ -1,5 +1,11 @@
 # graphtrace
 
+## 1.8.1
+
+### Patch Changes
+
+- Improve GraphTrace agent reliability with fresher MCP guidance, compact confidence summaries, replay benchmarks, worktree-aware routing, static Next route consumer links, React form-flow coverage, and stronger Laravel/CrudBooster search coverage.
+
 ## 1.8.0
 
 ### Minor Changes

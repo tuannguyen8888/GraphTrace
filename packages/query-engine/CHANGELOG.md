@@ -1,5 +1,13 @@
 # @graphtrace/query-engine
 
+## 1.8.1
+
+### Patch Changes
+
+- @graphtrace/indexer@1.8.1
+- @graphtrace/shared@1.8.1
+- @graphtrace/storage@1.8.1
+
 ## 1.8.0
 
 ### Minor Changes

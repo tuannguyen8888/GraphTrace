@@ -193,7 +193,30 @@ describe("agent bootstrap", () => {
       "Re-run `run_index` after significant workspace changes",
     );
     expect(codexSkill?.content).toContain("`list_workspaces`");
+    expect(codexSkill?.content).toContain("Query splitting");
+    expect(codexSkill?.content).toContain("one concept per query");
+    expect(codexSkill?.content).toContain(
+      "`get_status` -> focused `search_code` -> `get_symbol_context` -> `graphtrace_get_execution_context` / `graphtrace_get_symbol_impact` -> targeted source fallback",
+    );
+    expect(codexSkill?.content).toContain("Trust `proven`");
+    expect(codexSkill?.content).toContain("Confirm `inferred-strong`");
+    expect(codexSkill?.content).toContain("Treat `inferred-weak` as a lead");
+    expect(codexSkill?.content).toContain("Split multi-concept prompts");
+    expect(codexSkill?.content).toContain("Stop expanding GraphTrace");
     expect(codexSkill?.content).toContain("`workspaceId`");
+  });
+
+  test("documents the refreshed agent workflow in the README", async () => {
+    const readme = await readFile(join(process.cwd(), "README.md"), "utf8");
+
+    expect(readme).toContain("Agent workflow with GraphTrace");
+    expect(readme).toContain(
+      "status -> focused search -> symbol context -> impact/execution -> targeted fallback",
+    );
+    expect(readme).toContain("Split multi-concept requests into short queries");
+    expect(readme).toContain(
+      "Trust `proven`, confirm `inferred-strong`, and treat `inferred-weak` as a lead",
+    );
   });
 
   test("renders Claude config and managed CLAUDE.md guidance", async () => {

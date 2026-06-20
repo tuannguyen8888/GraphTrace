@@ -90,7 +90,7 @@ describe("indexWorkspace", () => {
     expect(result.summary.queryEdgeCount).toBeGreaterThanOrEqual(1);
   });
 
-  test("indexes next app router handlers", async () => {
+  test("indexes next app router handlers and static fetch consumers", async () => {
     await ensureWorkspaceInitialized(nextFixtureRoot);
 
     const result = await indexWorkspace({
@@ -100,6 +100,47 @@ describe("indexWorkspace", () => {
 
     expect(result.summary.routeCount).toBe(1);
     expect(result.summary.queryEdgeCount).toBe(0);
+
+    const store = openGraphStore(
+      join(nextFixtureRoot, ".graphtrace", "index.db"),
+    );
+
+    try {
+      expect(
+        store.symbolNeighbors("symbol:apps/web/src/lib/users.ts#loadUsers"),
+      ).toMatchObject({
+        edges: expect.arrayContaining([
+          expect.objectContaining({
+            type: "depends_on",
+            sourceId: "symbol:apps/web/src/lib/users.ts#loadUsers",
+            targetId: "symbol:apps/web/src/app/api/users/route.ts#GET",
+            confidenceLabel: "inferred-strong",
+          }),
+        ]),
+      });
+      expect(
+        store.executionContextFromSymbol(
+          "symbol:apps/web/src/app/api/users/route.ts#GET",
+        ),
+      ).toMatchObject({
+        nodes: expect.arrayContaining([
+          expect.objectContaining({
+            id: "GET /users",
+            kind: "route",
+          }),
+          expect.objectContaining({
+            id: "symbol:apps/web/src/lib/users.ts#loadUsers",
+            kind: "symbol",
+          }),
+          expect.objectContaining({
+            id: "symbol:apps/web/src/app/users/page.tsx#UsersPage",
+            kind: "symbol",
+          }),
+        ]),
+      });
+    } finally {
+      store.close();
+    }
   });
 
   test("indexes nest controllers and drizzle hints", async () => {
@@ -813,6 +854,24 @@ describe("indexWorkspace", () => {
           "symbol:app/Http/Controllers/AdminUsersController.php#AdminUsersController.getIndex",
         framework: "laravel",
       });
+      expect(store.search("AdminUsersController", "route").items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "GET /admin/users",
+            kind: "route",
+            path: "routes/web.php",
+          }),
+        ]),
+      );
+      expect(store.search("User", "symbol").items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "symbol:app/Models/User.php#User",
+            kind: "symbol",
+            path: "app/Models/User.php",
+          }),
+        ]),
+      );
       expect(
         store.symbolNeighbors(
           "symbol:app/Http/Controllers/AdminUsersController.php#AdminUsersController",
@@ -983,8 +1042,16 @@ describe("indexWorkspace", () => {
       expect(analyzeJsTsWorkspace).toHaveBeenCalledWith(
         expect.objectContaining({
           workspaceRoot: nextFixtureRoot,
-          allFiles: ["apps/web/src/app/api/users/route.ts"],
-          filesToIndex: ["apps/web/src/app/api/users/route.ts"],
+          allFiles: expect.arrayContaining([
+            "apps/web/src/app/api/users/route.ts",
+            "apps/web/src/app/users/page.tsx",
+            "apps/web/src/lib/users.ts",
+          ]),
+          filesToIndex: expect.arrayContaining([
+            "apps/web/src/app/api/users/route.ts",
+            "apps/web/src/app/users/page.tsx",
+            "apps/web/src/lib/users.ts",
+          ]),
         }),
       );
     } finally {
@@ -1184,6 +1251,39 @@ describe("indexWorkspace", () => {
         kind: "method",
         ownerSymbolId: "symbol:apps/web/src/dashboard.tsx#services.profile",
         ownerKind: "object",
+      });
+      expect(
+        store.symbolById(
+          "symbol:apps/web/src/dashboard.tsx#Dashboard.handleSubmit",
+        ),
+      ).toMatchObject({
+        kind: "function",
+        ownerSymbolId: "symbol:apps/web/src/dashboard.tsx#Dashboard",
+        ownerKind: "function",
+      });
+      expect(store.search("handleSubmit", "symbol").items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "symbol:apps/web/src/dashboard.tsx#Dashboard.handleSubmit",
+            kind: "symbol",
+          }),
+        ]),
+      );
+      expect(
+        store.executionContextFromSymbol(
+          "symbol:apps/web/src/dashboard.tsx#services.profile.saveProfile",
+        ),
+      ).toMatchObject({
+        nodes: expect.arrayContaining([
+          expect.objectContaining({
+            id: "symbol:apps/web/src/dashboard.tsx#Dashboard.handleSubmit",
+            kind: "symbol",
+          }),
+          expect.objectContaining({
+            id: "symbol:apps/web/src/dashboard.tsx#Dashboard",
+            kind: "symbol",
+          }),
+        ]),
       });
       expect(store.routeById("GET /reports")).toMatchObject({
         handlerSymbolId:

@@ -1,5 +1,11 @@
 # @graphtrace/web
 
+## 1.8.1
+
+### Patch Changes
+
+- @graphtrace/shared@1.8.1
+
 ## 1.8.0
 
 ### Patch Changes
