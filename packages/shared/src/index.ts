@@ -144,6 +144,7 @@ export interface QueryResult<T> {
   items: T[];
   graph?: GraphEnvelope;
   coverage?: CoverageSummary;
+  freshness?: IndexFreshnessInfo;
 }
 
 export interface CoverageWarning {
@@ -254,6 +255,16 @@ export interface IndexRunInfo {
   summary: IndexSummary | null;
 }
 
+export type IndexFreshnessState = "fresh" | "stale" | "missing" | "unknown";
+
+export interface IndexFreshnessInfo {
+  state: IndexFreshnessState;
+  checkedAt: string;
+  reason?: string;
+  newestSourcePath?: string;
+  newestSourceMtime?: string;
+}
+
 export interface GraphTraceStatus {
   workspaceRoot: string;
   dbPath: string;
@@ -262,6 +273,7 @@ export interface GraphTraceStatus {
   repositories?: RepositorySummary[];
   selectedRepositoryId?: string;
   lastIndexRun: IndexRunInfo | null;
+  freshness: IndexFreshnessInfo;
 }
 
 export interface RepositorySummary {

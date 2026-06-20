@@ -867,7 +867,7 @@ export class GraphStore {
     const maxEdges = options?.maxEdges ?? 40;
     const rows = this.db
       .prepare(
-        "SELECT * FROM edges WHERE type IN ('routes_to', 'calls', 'references', 'queries')",
+        "SELECT * FROM edges WHERE type IN ('routes_to', 'calls', 'references', 'depends_on', 'queries')",
       )
       .all() as unknown as EdgeRow[];
     const outgoing = new Map<string, EdgeRow[]>();

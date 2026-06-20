@@ -277,6 +277,14 @@ Why this helps:
 - gives agents `list_workspaces` plus optional `workspaceId` routing when multiple repos are indexed at the same time
 - encourages narrow semantic queries before broad repository scans, which reduces wasted context and token usage
 
+Agent workflow with GraphTrace:
+
+- Recommended path: status -> focused search -> symbol context -> impact/execution -> targeted fallback
+- Split multi-concept requests into short queries, using one route path, symbol name, file path, package, or framework term at a time
+- Move from `search_code` to `get_symbol_context`, `graphtrace_get_execution_context`, or `graphtrace_get_symbol_impact` once the first useful hit appears
+- Trust `proven`, confirm `inferred-strong`, and treat `inferred-weak` as a lead before making implementation or test claims
+- Use targeted source reads or `rg` only for the exact gap GraphTrace exposes, especially when results are empty, stale, partial, or truncated
+
 Manual step:
 
 - after files are generated, approve the GraphTrace MCP in Codex, Claude Code, or Cursor if that tool prompts for trust or MCP approval

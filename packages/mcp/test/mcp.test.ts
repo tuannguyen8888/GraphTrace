@@ -1,4 +1,5 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { cp, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -18,7 +19,9 @@ const symbolGraphFixtureRoot = join(
   "symbol-graph-workspace",
 );
 const laravelFixtureRoot = join(repoRoot, "fixtures", "laravel-workspace");
+const mixedFixtureRoot = join(repoRoot, "fixtures", "mixed-workspace");
 const cliEntry = join(repoRoot, "packages", "cli", "src", "bin.ts");
+const mcpEntry = join(repoRoot, "packages", "mcp", "src", "index.ts");
 
 interface ToolGraphItem {
   id?: string;
@@ -40,6 +43,35 @@ function readToolText(payload: unknown): string {
         (payload as { content?: Array<{ text?: string }> }).content?.[0]?.text,
       )
     : "";
+}
+
+async function createTempGitWorkspaceFromFixture(fixturePath: string) {
+  const sandboxRoot = await mkdtemp(
+    join(tmpdir(), "graphtrace-worktree-fixture-"),
+  );
+  const repoRoot = join(sandboxRoot, "repo");
+  await mkdir(repoRoot, { recursive: true });
+  await cp(fixturePath, repoRoot, { recursive: true });
+  execFileSync("git", ["init"], { cwd: repoRoot, stdio: "ignore" });
+  execFileSync("git", ["config", "user.name", "GraphTrace Test"], {
+    cwd: repoRoot,
+    stdio: "ignore",
+  });
+  execFileSync("git", ["config", "user.email", "graphtrace@example.com"], {
+    cwd: repoRoot,
+    stdio: "ignore",
+  });
+  execFileSync("git", ["add", "."], { cwd: repoRoot, stdio: "ignore" });
+  execFileSync("git", ["commit", "-m", "init"], {
+    cwd: repoRoot,
+    stdio: "ignore",
+  });
+
+  return {
+    sandboxRoot,
+    repoRoot,
+    cleanup: () => rm(sandboxRoot, { recursive: true, force: true }),
+  };
 }
 
 describe("mcp", () => {
@@ -90,6 +122,7 @@ describe("mcp", () => {
 
       expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
         "add_workspace",
+        "find_relevant_context",
         "get_data_flow",
         "get_dependencies",
         "get_impact_analysis",
@@ -113,6 +146,10 @@ describe("mcp", () => {
       const search = await client.callTool({
         name: "search_code",
         arguments: { query: "users" },
+      });
+      const searchVerbose = await client.callTool({
+        name: "search_code",
+        arguments: { query: "users", verbose: true },
       });
       const symbolContext = await client.callTool({
         name: "get_symbol_context",
@@ -148,6 +185,14 @@ describe("mcp", () => {
         name: "get_status",
         arguments: {},
       });
+      const statusVerbose = await client.callTool({
+        name: "get_status",
+        arguments: { verbose: true },
+      });
+      const routesVerbose = await client.callTool({
+        name: "get_routes",
+        arguments: { verbose: true },
+      });
       const reindex = await client.callTool({
         name: "run_index",
         arguments: {
@@ -168,11 +213,40 @@ describe("mcp", () => {
       const impactItems = readToolItems(impact.structuredContent);
       const flowItems = readToolItems(flow.structuredContent);
       const routeItems = readToolItems(routes.structuredContent);
+      const routePayload = routes.structuredContent as {
+        summary?: {
+          compact?: boolean;
+          totalItems?: number;
+          returnedItems?: number;
+        };
+      };
+      const searchPayload = search.structuredContent as {
+        summary?: {
+          compact?: boolean;
+          totalItems?: number;
+          returnedItems?: number;
+        };
+      };
+      const searchVerbosePayload = searchVerbose.structuredContent as {
+        summary?: unknown;
+        items?: unknown[];
+      };
       const statusPayload = status.structuredContent as {
         workspaceRoot?: string;
         counts?: {
           routeCount?: number;
         };
+        summary?: {
+          compact?: boolean;
+          unitCount?: number;
+        };
+        units?: unknown[];
+      };
+      const statusVerbosePayload = statusVerbose.structuredContent as {
+        units?: unknown[];
+      };
+      const routesVerbosePayload = routesVerbose.structuredContent as {
+        items?: unknown[];
       };
       const reindexPayload = reindex.structuredContent as {
         summary?: {
@@ -183,6 +257,15 @@ describe("mcp", () => {
       const overviewItems = readToolItems(overview.structuredContent);
 
       expect(search.isError).not.toBe(true);
+      expect(searchPayload.summary).toMatchObject({
+        compact: true,
+        totalItems: expect.any(Number),
+        returnedItems: expect.any(Number),
+      });
+      expect(searchVerbosePayload.summary).toBeUndefined();
+      expect(searchVerbosePayload.items?.length).toBeGreaterThanOrEqual(
+        searchPayload.summary?.totalItems ?? 0,
+      );
       expect(searchItems).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -231,6 +314,11 @@ describe("mcp", () => {
         ]),
       );
       expect(routes.isError).not.toBe(true);
+      expect(routePayload.summary).toMatchObject({
+        compact: true,
+        totalItems: expect.any(Number),
+        returnedItems: expect.any(Number),
+      });
       expect(routeItems).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -242,6 +330,15 @@ describe("mcp", () => {
       expect(status.isError).not.toBe(true);
       expect(statusPayload.workspaceRoot).toBe(fixtureRoot);
       expect(statusPayload.counts?.routeCount).toBe(1);
+      expect(statusPayload.units).toBeUndefined();
+      expect(statusPayload.summary).toMatchObject({
+        compact: true,
+        unitCount: expect.any(Number),
+      });
+      expect(statusVerbosePayload.units?.length).toBeGreaterThan(0);
+      expect(routesVerbosePayload.items?.length).toBeGreaterThanOrEqual(
+        routePayload.summary?.totalItems ?? 0,
+      );
       expect(reindex.isError).not.toBe(true);
       expect(reindexPayload.summary?.routeCount).toBe(1);
       expect(packages.isError).not.toBe(true);
@@ -263,6 +360,169 @@ describe("mcp", () => {
     } catch (error) {
       throw new Error(
         `MCP integration failed.\nSTDERR:\n${stderr || "<empty>"}\nCAUSE:${error instanceof Error ? ` ${error.message}` : ` ${String(error)}`}`,
+      );
+    } finally {
+      await transport.close().catch(() => undefined);
+      daemon.close();
+    }
+  }, 20_000);
+
+  test("finds relevant context in a JS/TS workspace", async () => {
+    await ensureWorkspaceInitialized(fixtureRoot);
+    await indexWorkspace({ workspaceRoot: fixtureRoot, full: true });
+    const homeDir = await mkdtemp(join(tmpdir(), "graphtrace-mcp-home-"));
+    const daemon = createGraphTraceDaemon({ homeDir });
+
+    const transport = new StdioClientTransport({
+      command: "pnpm",
+      args: [
+        "exec",
+        "node",
+        "--import",
+        "tsx",
+        cliEntry,
+        "mcp",
+        "--home",
+        homeDir,
+      ],
+      cwd: fixtureRoot,
+      stderr: "pipe",
+    });
+    const client = new Client(
+      {
+        name: "graphtrace-triage-js-test-client",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {},
+      },
+    );
+
+    try {
+      await daemon.addWorkspace(fixtureRoot, {
+        label: "fixture",
+      });
+      await client.connect(transport);
+
+      const triage = await client.callTool({
+        name: "find_relevant_context",
+        arguments: {
+          query: "Find the users route and listUsers handler context",
+        },
+      });
+      const payload = triage.structuredContent as {
+        freshness?: { state?: string };
+        searches?: Array<{ query?: string; kind?: string }>;
+        confidence?: { label?: string; score?: number };
+        candidates?: {
+          routes?: Array<{ method?: string; path?: string }>;
+          symbols?: Array<{ id?: string; path?: string }>;
+          files?: Array<{ path?: string }>;
+        };
+        nextActions?: string[];
+      };
+
+      expect(triage.isError).not.toBe(true);
+      expect(payload.freshness?.state).toBe("fresh");
+      expect(payload.searches?.length).toBeGreaterThan(1);
+      expect(payload.confidence?.score).toBeGreaterThan(0);
+      expect(payload.candidates?.routes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ method: "GET", path: "/users" }),
+        ]),
+      );
+      expect(payload.candidates?.symbols).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: expect.stringContaining("listUsers") }),
+        ]),
+      );
+      expect(payload.nextActions).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("graphtrace_get_symbol"),
+        ]),
+      );
+    } finally {
+      await transport.close().catch(() => undefined);
+      daemon.close();
+    }
+  }, 20_000);
+
+  test("finds relevant context in a PHP/Laravel workspace", async () => {
+    await ensureWorkspaceInitialized(laravelFixtureRoot);
+    await indexWorkspace({ workspaceRoot: laravelFixtureRoot, full: true });
+    const homeDir = await mkdtemp(join(tmpdir(), "graphtrace-mcp-home-"));
+    const daemon = createGraphTraceDaemon({ homeDir });
+
+    const transport = new StdioClientTransport({
+      command: "pnpm",
+      args: [
+        "exec",
+        "node",
+        "--import",
+        "tsx",
+        cliEntry,
+        "mcp",
+        "--home",
+        homeDir,
+      ],
+      cwd: laravelFixtureRoot,
+      stderr: "pipe",
+    });
+    const client = new Client(
+      {
+        name: "graphtrace-triage-php-test-client",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {},
+      },
+    );
+
+    try {
+      await daemon.addWorkspace(laravelFixtureRoot, {
+        label: "laravel-fixture",
+      });
+      await client.connect(transport);
+
+      const triage = await client.callTool({
+        name: "find_relevant_context",
+        arguments: {
+          query:
+            "Find Laravel users route controller and UserService listUsers",
+        },
+      });
+      const payload = triage.structuredContent as {
+        freshness?: { state?: string };
+        searches?: Array<{ query?: string; kind?: string }>;
+        confidence?: { label?: string; score?: number };
+        candidates?: {
+          routes?: Array<{ method?: string; path?: string }>;
+          symbols?: Array<{ id?: string; path?: string }>;
+          files?: Array<{ path?: string }>;
+        };
+        nextActions?: string[];
+      };
+
+      expect(triage.isError).not.toBe(true);
+      expect(payload.freshness?.state).toBe("fresh");
+      expect(payload.searches?.some((search) => search.kind === "route")).toBe(
+        true,
+      );
+      expect(payload.confidence?.label).not.toBe("low");
+      expect(payload.candidates?.routes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ method: "GET", path: "/users" }),
+        ]),
+      );
+      expect(payload.candidates?.symbols).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: expect.stringContaining("UserService.php"),
+          }),
+        ]),
+      );
+      expect(payload.nextActions).toEqual(
+        expect.arrayContaining([expect.stringContaining("search_code")]),
       );
     } finally {
       await transport.close().catch(() => undefined);
@@ -456,6 +716,11 @@ describe("mcp", () => {
         };
       };
       const executionPayload = execution.structuredContent as {
+        confidenceSummary?: {
+          label?: string;
+          signals?: string[];
+          recommendedVerification?: string[];
+        };
         graph?: {
           nodes?: Array<{ id?: string; kind?: string }>;
         };
@@ -500,6 +765,16 @@ describe("mcp", () => {
         ]),
       );
       expect(execution.isError).not.toBe(true);
+      expect(executionPayload.confidenceSummary?.signals).toEqual(
+        expect.arrayContaining(["proven", "inferred-strong"]),
+      );
+      expect(
+        executionPayload.confidenceSummary?.recommendedVerification,
+      ).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("graphtrace_explain_edge"),
+        ]),
+      );
       expect(executionPayload.graph?.nodes).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -609,6 +884,71 @@ describe("mcp", () => {
               "User::query()->where('active', true)->get(",
             ),
           }),
+        ]),
+      );
+    } finally {
+      await transport.close().catch(() => undefined);
+      daemon.close();
+    }
+  }, 20_000);
+
+  test("adds confidence summaries for partial-indexing search results", async () => {
+    await ensureWorkspaceInitialized(mixedFixtureRoot);
+    await indexWorkspace({ workspaceRoot: mixedFixtureRoot, full: true });
+    const homeDir = await mkdtemp(join(tmpdir(), "graphtrace-mcp-home-"));
+    const daemon = createGraphTraceDaemon({ homeDir });
+
+    const transport = new StdioClientTransport({
+      command: "pnpm",
+      args: [
+        "exec",
+        "node",
+        "--import",
+        "tsx",
+        cliEntry,
+        "mcp",
+        "--home",
+        homeDir,
+      ],
+      cwd: mixedFixtureRoot,
+      stderr: "pipe",
+    });
+    const client = new Client(
+      {
+        name: "graphtrace-confidence-partial-client",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {},
+      },
+    );
+
+    try {
+      await daemon.addWorkspace(mixedFixtureRoot, { label: "mixed" });
+      await client.connect(transport);
+
+      const search = await client.callTool({
+        name: "search_code",
+        arguments: { query: "server" },
+      });
+      const payload = search.structuredContent as {
+        confidenceSummary?: {
+          label?: string;
+          signals?: string[];
+          recommendedVerification?: string[];
+        };
+      };
+
+      expect(search.isError).not.toBe(true);
+      expect(payload.confidenceSummary).toMatchObject({
+        label: "low",
+      });
+      expect(payload.confidenceSummary?.signals).toEqual(
+        expect.arrayContaining(["partial", "shallow"]),
+      );
+      expect(payload.confidenceSummary?.recommendedVerification).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("shallow metadata only"),
         ]),
       );
     } finally {
@@ -747,6 +1087,202 @@ describe("mcp", () => {
       daemon.close();
     }
   }, 20_000);
+
+  test("prefers the active worktree over the base repo and ranks list_workspaces by cwd", async () => {
+    const fixture = await createTempGitWorkspaceFromFixture(fixtureRoot);
+    const worktreeRoot = join(fixture.sandboxRoot, "repo-worktree");
+    execFileSync(
+      "git",
+      ["worktree", "add", "-b", "feature/triage", worktreeRoot],
+      {
+        cwd: fixture.repoRoot,
+        stdio: "ignore",
+      },
+    );
+    await ensureWorkspaceInitialized(fixture.repoRoot);
+    await ensureWorkspaceInitialized(worktreeRoot);
+    await indexWorkspace({ workspaceRoot: fixture.repoRoot, full: true });
+    await indexWorkspace({ workspaceRoot: worktreeRoot, full: true });
+    const homeDir = await mkdtemp(join(tmpdir(), "graphtrace-mcp-home-"));
+    const daemon = createGraphTraceDaemon({ homeDir });
+
+    const transport = new StdioClientTransport({
+      command: "pnpm",
+      args: [
+        "exec",
+        "node",
+        "--import",
+        "tsx",
+        "--eval",
+        `process.chdir(${JSON.stringify(worktreeRoot)}); const { createGraphTraceMcpServer } = await import(${JSON.stringify(mcpEntry)}); await createGraphTraceMcpServer({ homeDir: ${JSON.stringify(homeDir)}, workspaceRoot: ${JSON.stringify(worktreeRoot)} });`,
+      ],
+      cwd: repoRoot,
+      stderr: "pipe",
+    });
+    const client = new Client(
+      {
+        name: "graphtrace-worktree-test-client",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {},
+      },
+    );
+
+    try {
+      const baseWorkspace = await daemon.addWorkspace(fixture.repoRoot, {
+        label: "fixture",
+      });
+      const worktreeWorkspace = await daemon.addWorkspace(worktreeRoot, {
+        label: "fixture",
+      });
+      await client.connect(transport);
+
+      const workspaces = await client.callTool({
+        name: "list_workspaces",
+        arguments: {},
+      });
+      const status = await client.callTool({
+        name: "get_status",
+        arguments: {},
+      });
+      const mismatched = await client.callTool({
+        name: "get_status",
+        arguments: { workspaceId: baseWorkspace.id },
+      });
+      const workspaceItems = readToolItems(
+        workspaces.structuredContent,
+      ) as Array<{
+        id?: string;
+        canonicalRootPath?: string;
+        score?: number;
+        currentCwdRank?: number;
+        cwdRelationship?: string;
+      }>;
+      const statusPayload = status.structuredContent as {
+        workspaceRoot?: string;
+      };
+      const mismatchedPayload = mismatched.structuredContent as {
+        workspaceRoot?: string;
+        routingWarning?: { code?: string; message?: string };
+      };
+
+      expect(workspaces.isError).not.toBe(true);
+      expect(workspaceItems[0]).toMatchObject({
+        id: worktreeWorkspace.id,
+        canonicalRootPath: worktreeRoot,
+      });
+      expect(workspaceItems[0]?.cwdRelationship).toBe("exact");
+      expect(workspaceItems[1]).toMatchObject({
+        id: baseWorkspace.id,
+      });
+      expect(status.isError).not.toBe(true);
+      expect(statusPayload.workspaceRoot).toBe(worktreeRoot);
+      expect(mismatched.isError).not.toBe(true);
+      expect(mismatchedPayload.workspaceRoot).toBe(fixture.repoRoot);
+      expect(mismatchedPayload.routingWarning).toMatchObject({
+        code: "workspace-root-mismatch",
+      });
+      expect(mismatchedPayload.routingWarning?.message).toContain(worktreeRoot);
+    } finally {
+      await client.close().catch(() => undefined);
+      await transport.close().catch(() => undefined);
+      daemon.close();
+      await fixture.cleanup();
+    }
+  }, 30_000);
+
+  test("marks deleted worktrees missing and keeps same-label workspaces distinguishable", async () => {
+    const fixture = await createTempGitWorkspaceFromFixture(fixtureRoot);
+    const deletedWorktreeRoot = join(
+      fixture.sandboxRoot,
+      "repo-deleted-worktree",
+    );
+    execFileSync(
+      "git",
+      ["worktree", "add", "-b", "feature/deleted", deletedWorktreeRoot],
+      {
+        cwd: fixture.repoRoot,
+        stdio: "ignore",
+      },
+    );
+    await ensureWorkspaceInitialized(fixture.repoRoot);
+    await ensureWorkspaceInitialized(deletedWorktreeRoot);
+    await indexWorkspace({ workspaceRoot: fixture.repoRoot, full: true });
+    await indexWorkspace({ workspaceRoot: deletedWorktreeRoot, full: true });
+    const homeDir = await mkdtemp(join(tmpdir(), "graphtrace-mcp-home-"));
+    const daemon = createGraphTraceDaemon({ homeDir });
+
+    const transport = new StdioClientTransport({
+      command: "pnpm",
+      args: [
+        "exec",
+        "node",
+        "--import",
+        "tsx",
+        "--eval",
+        `process.chdir(${JSON.stringify(fixture.repoRoot)}); const { createGraphTraceMcpServer } = await import(${JSON.stringify(mcpEntry)}); await createGraphTraceMcpServer({ homeDir: ${JSON.stringify(homeDir)}, workspaceRoot: ${JSON.stringify(fixture.repoRoot)} });`,
+      ],
+      cwd: repoRoot,
+      stderr: "pipe",
+    });
+    const client = new Client(
+      {
+        name: "graphtrace-missing-worktree-test-client",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {},
+      },
+    );
+
+    try {
+      const baseWorkspace = await daemon.addWorkspace(fixture.repoRoot, {
+        label: "fixture",
+      });
+      const deletedWorkspace = await daemon.addWorkspace(deletedWorktreeRoot, {
+        label: "fixture",
+      });
+      await rm(deletedWorktreeRoot, { recursive: true, force: true });
+      await client.connect(transport);
+
+      const workspaces = await client.callTool({
+        name: "list_workspaces",
+        arguments: {},
+      });
+      const workspaceItems = readToolItems(
+        workspaces.structuredContent,
+      ) as Array<{
+        id?: string;
+        label?: string;
+        status?: string;
+        canonicalRootPath?: string;
+      }>;
+
+      expect(workspaces.isError).not.toBe(true);
+      expect(workspaceItems).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: baseWorkspace.id,
+            label: "fixture",
+            status: "ready",
+          }),
+          expect.objectContaining({
+            id: deletedWorkspace.id,
+            label: "fixture",
+            status: "missing",
+            canonicalRootPath: deletedWorktreeRoot,
+          }),
+        ]),
+      );
+      expect(baseWorkspace.id).not.toBe(deletedWorkspace.id);
+    } finally {
+      await client.close().catch(() => undefined);
+      await transport.close().catch(() => undefined);
+      daemon.close();
+      await fixture.cleanup();
+    }
+  }, 30_000);
 
   test("writes opt-in MCP telemetry events", async () => {
     await ensureWorkspaceInitialized(fixtureRoot);

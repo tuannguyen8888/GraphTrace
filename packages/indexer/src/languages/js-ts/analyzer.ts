@@ -181,6 +181,13 @@ export async function analyzeJsTsWorkspace(
           filePath,
           checker,
         }),
+        ...extractNextRouteConsumerEdges({
+          workspaceRoot: options.workspaceRoot,
+          sourceFile,
+          filePath,
+          symbols: symbolMap,
+          matchedPluginIds,
+        }),
       ],
     });
   }
@@ -488,6 +495,202 @@ function extractNextRoutes(
   }
 
   return routes;
+}
+
+function extractNextRouteConsumerEdges(options: {
+  workspaceRoot: string;
+  sourceFile: ts.SourceFile;
+  filePath: string;
+  symbols: SymbolDescriptor[];
+  matchedPluginIds: Set<string>;
+}): GraphEdgeDescriptor[] {
+  if (!options.matchedPluginIds.has("framework:next")) {
+    return [];
+  }
+
+  const normalizedFilePath = toPosixPath(options.filePath);
+  const edges = new Map<string, GraphEdgeDescriptor>();
+
+  const visit = (node: ts.Node) => {
+    if (ts.isCallExpression(node) && isFetchCall(node.expression)) {
+      const apiPath = readStaticFetchApiPath(node);
+      const method = readStaticFetchMethod(node);
+      const routeFilePath = apiPath
+        ? resolveNextRouteFileForApiPath(
+            options.workspaceRoot,
+            normalizedFilePath,
+            apiPath,
+          )
+        : null;
+
+      if (apiPath && routeFilePath) {
+        const location = options.sourceFile.getLineAndCharacterOfPosition(
+          node.getStart(options.sourceFile),
+        );
+        const sourceSymbol = findEnclosingSymbol(
+          options.symbols,
+          location.line + 1,
+          location.character + 1,
+        );
+        const targetId = `symbol:${routeFilePath}#${method}`;
+
+        if (sourceSymbol && sourceSymbol.id !== targetId) {
+          const edgeId = `edge:depends_on:${sourceSymbol.id}->${targetId}:next-fetch:${method}:${apiPath}`;
+          edges.set(edgeId, {
+            id: edgeId,
+            type: "depends_on",
+            sourceId: sourceSymbol.id,
+            sourceKind: "symbol",
+            targetId,
+            targetKind: "symbol",
+            confidence: 0.85,
+            confidenceLabel: "inferred-strong",
+            provenance: {
+              kind: "next-static-fetch",
+              source: "source-pattern",
+              evidence: [
+                `${normalizedFilePath}:${location.line + 1}:${location.character + 1}`,
+                `${method} ${apiPath}`,
+              ],
+            },
+            metadata: {
+              method,
+              apiPath,
+              routeFilePath,
+            },
+          });
+        }
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  ts.forEachChild(options.sourceFile, visit);
+  return [...edges.values()];
+}
+
+function isFetchCall(expression: ts.Expression): boolean {
+  return (
+    (ts.isIdentifier(expression) && expression.text === "fetch") ||
+    (ts.isPropertyAccessExpression(expression) &&
+      expression.name.text === "fetch")
+  );
+}
+
+function readStaticFetchApiPath(node: ts.CallExpression): string | null {
+  const [firstArgument] = node.arguments;
+  if (!firstArgument || !ts.isStringLiteralLike(firstArgument)) {
+    return null;
+  }
+
+  return firstArgument.text.startsWith("/api/") ? firstArgument.text : null;
+}
+
+function readStaticFetchMethod(node: ts.CallExpression): string {
+  const [, init] = node.arguments;
+  if (!init || !ts.isObjectLiteralExpression(init)) {
+    return "GET";
+  }
+
+  for (const property of init.properties) {
+    if (
+      ts.isPropertyAssignment(property) &&
+      ts.isIdentifier(property.name) &&
+      property.name.text === "method" &&
+      ts.isStringLiteralLike(property.initializer)
+    ) {
+      return property.initializer.text.toUpperCase();
+    }
+  }
+
+  return "GET";
+}
+
+function resolveNextRouteFileForApiPath(
+  workspaceRoot: string,
+  filePath: string,
+  apiPath: string,
+): string | null {
+  const routeSegment = apiPath
+    .replace(/^\/api\/?/, "")
+    .replace(/^\/+|\/+$/g, "");
+  const routePath = routeSegment ? `${routeSegment}/route` : "route";
+  const candidates: string[] = [];
+  const srcMarker = "/src/";
+  const srcIndex = filePath.lastIndexOf(srcMarker);
+
+  if (srcIndex >= 0) {
+    candidates.push(
+      `${filePath.slice(0, srcIndex + srcMarker.length - 1)}/app/api/${routePath}`,
+    );
+  }
+
+  const appMarker = "/app/";
+  const appIndex = filePath.lastIndexOf(appMarker);
+  if (appIndex >= 0) {
+    candidates.push(`${filePath.slice(0, appIndex)}/app/api/${routePath}`);
+  }
+
+  candidates.push(`app/api/${routePath}`, `src/app/api/${routePath}`);
+
+  for (const candidate of [...new Set(candidates)]) {
+    for (const extension of [".ts", ".tsx", ".js", ".jsx"]) {
+      const routeFilePath = `${candidate}${extension}`;
+      if (
+        typeof ts.sys.readFile(join(workspaceRoot, routeFilePath)) === "string"
+      ) {
+        return routeFilePath;
+      }
+    }
+  }
+
+  return null;
+}
+
+function findEnclosingSymbol(
+  symbols: SymbolDescriptor[],
+  line: number,
+  column: number,
+): SymbolDescriptor | null {
+  const candidates = symbols.filter((symbol) =>
+    containsPosition(symbol, line, column),
+  );
+
+  return (
+    candidates.sort((left, right) => spanSize(left) - spanSize(right))[0] ??
+    null
+  );
+}
+
+function containsPosition(
+  symbol: SymbolDescriptor,
+  line: number,
+  column: number,
+): boolean {
+  if (!symbol.span) {
+    return false;
+  }
+
+  const startsBefore =
+    symbol.span.startLine < line ||
+    (symbol.span.startLine === line && symbol.span.startColumn <= column);
+  const endsAfter =
+    symbol.span.endLine > line ||
+    (symbol.span.endLine === line && symbol.span.endColumn >= column);
+
+  return startsBefore && endsAfter;
+}
+
+function spanSize(symbol: SymbolDescriptor): number {
+  if (!symbol.span) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  return (
+    (symbol.span.endLine - symbol.span.startLine) * 10_000 +
+    (symbol.span.endColumn - symbol.span.startColumn)
+  );
 }
 
 function extractNestRoutes(
